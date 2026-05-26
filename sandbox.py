@@ -4,10 +4,11 @@ import cv2
 
 def get_depth(dev, data, timestamp):
     depth = data.astype(np.float32)
-    depth_min = 500
-    depth_max = 1500
+    depth_min = 400
+    depth_max = 2000
     depth = np.clip(depth, depth_min, depth_max)
     depth = (depth - depth_min) / (depth_max - depth_min)
+    depth = 1.0 - depth  # ← invertir colores
     depth = (depth * 255).astype(np.uint8)
     color = cv2.applyColorMap(depth, cv2.COLORMAP_JET)
     cv2.imshow('Sandbox', color)
