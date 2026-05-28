@@ -21,6 +21,8 @@ config = {
 colormap_idx = [0]
 colormaps_builtin = [cv2.COLORMAP_JET, cv2.COLORMAP_TURBO, cv2.COLORMAP_RAINBOW, cv2.COLORMAP_HOT]
 colormap_names = ['JET', 'TURBO', 'RAINBOW', 'TOPO']
+last_depth_frame = [None]
+auto_calib_status = ['Listo']
 
 def make_topo_colormap():
     colors = [
@@ -72,6 +74,7 @@ def draw_calibration_ui(frame):
     return frame
 
 def get_depth(dev, data, timestamp):
+    last_depth_frame[0] = data.copy()
     depth = data.astype(np.float32)
     depth = np.clip(depth, config['depth_min'], config['depth_max'])
     depth = (depth - config['depth_min']) / (config['depth_max'] - config['depth_min'])
@@ -87,7 +90,23 @@ def get_depth(dev, data, timestamp):
 def get_video(dev, data, timestamp):
     pass
 
-# Flask web interface
+def auto_calibrate():
+    auto_calib_status[0] = 'Leyendo...'
+    if last_depth_frame[0] is None:
+        auto_calib_status[0] = 'Error: sin datos'
+        return
+    depth = last_depth_frame[0].astype(np.float32)
+    valid = depth[(depth > 0) & (depth < 2047)]
+    if len(valid) == 0:
+        auto_calib_status[0] = 'Error: sin datos validos'
+        return
+    mean = int(valid.mean())
+    std = int(valid.std())
+    config['depth_min'] = max(0, mean - 2 * std)
+    config['depth_max'] = min(2047, mean + std)
+    auto_calib_status[0] = f'OK: min={config["depth_min"]} max={config["depth_max"]}'
+
+# Flask
 app = Flask(__name__)
 
 HTML = '''
@@ -108,45 +127,55 @@ HTML = '''
         label span { color: #00d4ff; font-weight: bold; }
         input[type=range] { width: 100%; height: 8px; accent-color: #00d4ff; }
         .btn-row { display: flex; gap: 10px; flex-wrap: wrap; }
-        button { flex: 1; padding: 12px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: bold; }
+        button { flex: 1; padding: 12px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: bold; transition: opacity 0.2s; }
+        button:active { opacity: 0.7; }
         .btn-color { background: #0f3460; color: #00d4ff; }
+        .btn-color.active { background: #00d4ff; color: #1a1a2e; }
         .btn-calib { background: #e94560; color: white; }
         .btn-exhib { background: #0f9b58; color: white; }
         .btn-save { background: #f5a623; color: #1a1a2e; }
+        .btn-auto { background: #7b2ff7; color: white; width: 100%; margin-bottom: 10px; padding: 15px; font-size: 16px; }
         .status { background: #0f3460; border-radius: 8px; padding: 15px; font-size: 13px; line-height: 2; }
         .status span { color: #00d4ff; }
+        .calib-status { text-align: center; color: #aaa; font-size: 12px; margin-top: 8px; }
     </style>
 </head>
 <body>
     <h1>🏔️ Sandbox Control</h1>
 
     <div class="card">
-        <h2>Rango de Profundidad</h2>
+        <h2>🎯 Auto Calibración</h2>
+        <button class="btn-auto" onclick="autoCalibrate()">⚡ Auto Calibrar desde Arena</button>
+        <div class="calib-status" id="calib_status">Presiona para leer valores reales del Kinect</div>
+    </div>
+
+    <div class="card">
+        <h2>Rango de Profundidad (ajuste fino)</h2>
         <div class="slider-row">
             <label>depth_min <span id="val_min">400</span></label>
-            <input type="range" id="depth_min" min="0" max="3900" value="400" oninput="update()">
+            <input type="range" id="depth_min" min="0" max="2047" value="400" oninput="update()">
         </div>
         <div class="slider-row">
             <label>depth_max <span id="val_max">2000</span></label>
-            <input type="range" id="depth_max" min="100" max="4000" value="2000" oninput="update()">
+            <input type="range" id="depth_max" min="100" max="2047" value="2000" oninput="update()">
         </div>
     </div>
 
     <div class="card">
         <h2>Colormap</h2>
         <div class="btn-row">
-            <button class="btn-color" onclick="setColormap(0)">JET</button>
-            <button class="btn-color" onclick="setColormap(1)">TURBO</button>
-            <button class="btn-color" onclick="setColormap(2)">RAINBOW</button>
-            <button class="btn-color" onclick="setColormap(3)">TOPO 🏔️</button>
+            <button class="btn-color" id="cm0" onclick="setColormap(0)">JET</button>
+            <button class="btn-color" id="cm1" onclick="setColormap(1)">TURBO</button>
+            <button class="btn-color" id="cm2" onclick="setColormap(2)">RAINBOW</button>
+            <button class="btn-color" id="cm3" onclick="setColormap(3)">TOPO 🏔️</button>
         </div>
     </div>
 
     <div class="card">
         <h2>Modo</h2>
         <div class="btn-row">
-            <button class="btn-calib" onclick="setMode('calibration')">Calibración</button>
-            <button class="btn-exhib" onclick="setMode('exhibition')">Exhibición</button>
+            <button class="btn-calib" onclick="setMode('calibration')">🔧 Calibración</button>
+            <button class="btn-exhib" onclick="setMode('exhibition')">🎬 Exhibición</button>
         </div>
     </div>
 
@@ -158,18 +187,20 @@ HTML = '''
 
     <script>
         function update() {
-            const min = document.getElementById('depth_min').value;
-            const max = document.getElementById('depth_max').value;
+            const min = parseInt(document.getElementById('depth_min').value);
+            const max = parseInt(document.getElementById('depth_max').value);
             document.getElementById('val_min').textContent = min;
             document.getElementById('val_max').textContent = max;
             fetch('/update', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({depth_min: parseInt(min), depth_max: parseInt(max)})
+                body: JSON.stringify({depth_min: min, depth_max: max})
             }).then(r => r.json()).then(updateStatus);
         }
 
         function setColormap(idx) {
+            document.querySelectorAll('[id^=cm]').forEach(b => b.classList.remove('active'));
+            document.getElementById('cm' + idx).classList.add('active');
             fetch('/colormap', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -191,6 +222,22 @@ HTML = '''
             });
         }
 
+        function autoCalibrate() {
+            const btn = document.querySelector('.btn-auto');
+            btn.textContent = '⏳ Leyendo Kinect...';
+            btn.disabled = true;
+            fetch('/auto_calibrate', {method: 'POST'}).then(r => r.json()).then(data => {
+                document.getElementById('calib_status').textContent = '✅ ' + data.status;
+                document.getElementById('depth_min').value = data.depth_min;
+                document.getElementById('depth_max').value = data.depth_max;
+                document.getElementById('val_min').textContent = data.depth_min;
+                document.getElementById('val_max').textContent = data.depth_max;
+                btn.textContent = '⚡ Auto Calibrar desde Arena';
+                btn.disabled = false;
+                updateStatus(data);
+            });
+        }
+
         function updateStatus(data) {
             document.getElementById('status').innerHTML =
                 `<span>depth_min:</span> ${data.depth_min}<br>
@@ -205,6 +252,11 @@ HTML = '''
                 document.getElementById('depth_max').value = data.depth_max;
                 document.getElementById('val_min').textContent = data.depth_min;
                 document.getElementById('val_max').textContent = data.depth_max;
+                const idx = ['JET','TURBO','RAINBOW','TOPO'].indexOf(data.colormap);
+                if (idx >= 0) {
+                    document.querySelectorAll('[id^=cm]').forEach(b => b.classList.remove('active'));
+                    document.getElementById('cm' + idx).classList.add('active');
+                }
                 updateStatus(data);
             });
         }
@@ -253,6 +305,17 @@ def set_mode():
 def save():
     save_config()
     return jsonify({'msg': 'Configuracion guardada'})
+
+@app.route('/auto_calibrate', methods=['POST'])
+def auto_calibrate_route():
+    auto_calibrate()
+    return jsonify({
+        'depth_min': config['depth_min'],
+        'depth_max': config['depth_max'],
+        'colormap': colormap_names[colormap_idx[0]],
+        'mode': config['mode'],
+        'status': auto_calib_status[0]
+    })
 
 def run_flask():
     app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
