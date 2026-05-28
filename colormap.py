@@ -1,10 +1,6 @@
 import cv2
 import numpy as np
 
-from config import colormap_idx, colormap_names
-
-colormaps_builtin = [cv2.COLORMAP_JET, cv2.COLORMAP_TURBO, cv2.COLORMAP_RAINBOW, cv2.COLORMAP_HOT]
-
 
 def make_topo_colormap():
     colors = [
@@ -31,7 +27,5 @@ def make_topo_colormap():
 topo_lut = make_topo_colormap()
 
 
-def apply_colormap(gray, idx):
-    if colormap_names[idx] == 'TOPO':
-        return cv2.applyColorMap(gray, topo_lut)
-    return cv2.applyColorMap(gray, colormaps_builtin[idx])
+def apply_colormap(gray):
+    return cv2.applyColorMap(gray, topo_lut)

@@ -1,6 +1,6 @@
 from flask import Flask, render_template_string, request, jsonify
 
-from config import config, colormap_idx, colormap_names, auto_calib_status, floor_frame, save_config
+from config import config, auto_calib_status, floor_frame, live_stretch, save_config
 from kinect import auto_calibrate, calibrate_floor, reset_floor
 
 app = Flask(__name__)
@@ -18,61 +18,73 @@ HTML = '''
         h1 { color: #00d4ff; text-align: center; margin-bottom: 30px; font-size: 24px; }
         .card { background: #16213e; border-radius: 12px; padding: 20px; margin-bottom: 20px; }
         .card h2 { color: #00d4ff; margin-bottom: 15px; font-size: 16px; }
+        .card p { font-size: 12px; color: #aaa; margin-bottom: 12px; }
         .slider-row { margin-bottom: 15px; }
         label { display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 14px; }
         label span { color: #00d4ff; font-weight: bold; }
         input[type=range] { width: 100%; height: 8px; accent-color: #00d4ff; }
         .btn-row { display: flex; gap: 10px; flex-wrap: wrap; }
-        button { flex: 1; padding: 12px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: bold; transition: opacity 0.2s; }
+        button { flex: 1; padding: 12px; border: none; border-radius: 8px; cursor: pointer;
+                 font-size: 14px; font-weight: bold; transition: opacity 0.2s; }
         button:active { opacity: 0.7; }
-        .btn-color { background: #0f3460; color: #00d4ff; }
-        .btn-color.active { background: #00d4ff; color: #1a1a2e; }
-        .btn-calib { background: #e94560; color: white; }
-        .btn-exhib { background: #0f9b58; color: white; }
-        .btn-save { background: #f5a623; color: #1a1a2e; }
-        .btn-auto { background: #7b2ff7; color: white; width: 100%; margin-bottom: 10px; padding: 15px; font-size: 16px; }
-        .btn-floor { background: #00897b; color: white; }
+        .btn-calib  { background: #e94560; color: white; }
+        .btn-exhib  { background: #0f9b58; color: white; }
+        .btn-save   { background: #f5a623; color: #1a1a2e; }
+        .btn-auto   { background: #7b2ff7; color: white; width: 100%; margin-bottom: 10px; padding: 15px; font-size: 16px; }
+        .btn-floor  { background: #00897b; color: white; }
         .btn-floor-reset { background: #37474f; color: #ccc; }
+        .btn-stretch-off { background: #1a3a5c; color: #00d4ff; border: 2px solid #00d4ff; width: 100%; padding: 14px; font-size: 15px; }
+        .btn-stretch-on  { background: #00d4ff; color: #1a1a2e; width: 100%; padding: 14px; font-size: 15px; }
         .floor-active { border: 2px solid #00e5ff; }
         .status { background: #0f3460; border-radius: 8px; padding: 15px; font-size: 13px; line-height: 2; }
         .status span { color: #00d4ff; }
         .calib-status { text-align: center; color: #aaa; font-size: 12px; margin-top: 8px; }
-        .floor-badge { display: inline-block; padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: bold; margin-top: 8px; }
-        .floor-badge.on { background: #00897b; color: white; }
-        .floor-badge.off { background: #37474f; color: #aaa; }
+        .badge { display: inline-block; padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: bold; margin-top: 8px; }
+        .badge-on  { background: #00897b; color: white; }
+        .badge-off { background: #37474f; color: #aaa; }
     </style>
 </head>
 <body>
     <h1>🏔️ Sandbox Control</h1>
 
+    <!-- LIVE STRETCH -->
+    <div class="card">
+        <h2>⚡ Live Auto-Stretch</h2>
+        <p>Ajusta el rango de colores automáticamente en tiempo real según la elevación actual. Actívalo después de fijar el suelo.</p>
+        <button id="btn_stretch" class="btn-stretch-off" onclick="toggleStretch()">
+            ACTIVAR LIVE STRETCH
+        </button>
+        <div class="calib-status" id="stretch_status">Desactivado — usa los sliders o Auto Calibrar</div>
+    </div>
+
+    <!-- SUELO -->
     <div class="card" id="floor_card">
         <h2>📐 Calibración de Suelo</h2>
-        <p style="font-size:12px; color:#aaa; margin-bottom:12px;">
-            Deja la superficie <b>plana y vacía</b>, luego presiona para fijar el nivel base.
-            El colormap mostrará solo la elevación sobre ese suelo.
-        </p>
+        <p>Deja la superficie <b>plana y vacía</b>, luego presiona para fijar el nivel base.</p>
         <div class="btn-row" style="margin-bottom:10px;">
             <button class="btn-floor" onclick="calibrateFloor()">📐 Fijar Suelo Plano</button>
-            <button class="btn-floor-reset" onclick="resetFloor()">🔄 Quitar Calibración</button>
+            <button class="btn-floor-reset" onclick="resetFloor()">🔄 Quitar</button>
         </div>
         <div class="calib-status" id="floor_status">Sin calibrar — modo clásico activo</div>
         <div style="text-align:center;">
-            <span class="floor-badge off" id="floor_badge">SIN SUELO</span>
+            <span class="badge badge-off" id="floor_badge">SIN SUELO</span>
         </div>
     </div>
 
+    <!-- AUTO CALIBRAR -->
     <div class="card">
-        <h2>🎯 Auto Calibración</h2>
+        <h2>🎯 Auto Calibración (snapshot)</h2>
         <button class="btn-auto" onclick="autoCalibrate()">⚡ Auto Calibrar Rango</button>
         <div class="calib-status" id="calib_status">
-            Con suelo calibrado: detecta altura del montón. Sin suelo: ajusta rango clásico.
+            Con suelo fijado: detecta altura del montón. Sin suelo: ajusta rango clásico.
         </div>
     </div>
 
+    <!-- RANGO MANUAL -->
     <div class="card">
         <h2>Rango <span id="range_label" style="font-size:12px; color:#aaa;">(profundidad)</span></h2>
         <div class="slider-row">
-            <label>depth_min <span id="val_min">400</span></label>
+            <label>depth_min <span id="val_min">0</span></label>
             <input type="range" id="depth_min" min="0" max="2047" value="400" oninput="update()">
         </div>
         <div class="slider-row">
@@ -81,16 +93,7 @@ HTML = '''
         </div>
     </div>
 
-    <div class="card">
-        <h2>Colormap</h2>
-        <div class="btn-row">
-            <button class="btn-color" id="cm0" onclick="setColormap(0)">JET</button>
-            <button class="btn-color" id="cm1" onclick="setColormap(1)">TURBO</button>
-            <button class="btn-color" id="cm2" onclick="setColormap(2)">RAINBOW</button>
-            <button class="btn-color" id="cm3" onclick="setColormap(3)">TOPO 🏔️</button>
-        </div>
-    </div>
-
+    <!-- MODO -->
     <div class="card">
         <h2>Modo</h2>
         <div class="btn-row">
@@ -99,10 +102,12 @@ HTML = '''
         </div>
     </div>
 
+    <!-- GUARDAR -->
     <div class="card">
         <button class="btn-save" onclick="saveConfig()" style="width:100%">💾 Guardar Configuración</button>
     </div>
 
+    <!-- STATUS -->
     <div class="card status" id="status">Cargando...</div>
 
     <script>
@@ -115,16 +120,6 @@ HTML = '''
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({depth_min: min, depth_max: max})
-            }).then(r => r.json()).then(updateStatus);
-        }
-
-        function setColormap(idx) {
-            document.querySelectorAll('[id^=cm]').forEach(b => b.classList.remove('active'));
-            document.getElementById('cm' + idx).classList.add('active');
-            fetch('/colormap', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({idx: idx})
             }).then(r => r.json()).then(updateStatus);
         }
 
@@ -148,10 +143,6 @@ HTML = '''
             btn.disabled = true;
             fetch('/auto_calibrate', {method: 'POST'}).then(r => r.json()).then(data => {
                 document.getElementById('calib_status').textContent = '✅ ' + data.status;
-                document.getElementById('depth_min').value = data.depth_min;
-                document.getElementById('depth_max').value = data.depth_max;
-                document.getElementById('val_min').textContent = data.depth_min;
-                document.getElementById('val_max').textContent = data.depth_max;
                 btn.textContent = '⚡ Auto Calibrar Rango';
                 btn.disabled = false;
                 updateStatus(data);
@@ -166,79 +157,87 @@ HTML = '''
                 btn.textContent = '📐 Fijar Suelo Plano';
                 btn.disabled = false;
                 document.getElementById('floor_status').textContent = '✅ ' + data.msg;
-                updateFloorBadge(data.floor_active);
-                updateRangeLabel(data.floor_active);
+                updateStatus(data);
             });
         }
 
         function resetFloor() {
             fetch('/reset_floor', {method: 'POST'}).then(r => r.json()).then(data => {
                 document.getElementById('floor_status').textContent = data.msg;
-                updateFloorBadge(data.floor_active);
-                updateRangeLabel(data.floor_active);
-            });
-        }
-
-        function updateFloorBadge(active) {
-            const badge = document.getElementById('floor_badge');
-            const card = document.getElementById('floor_card');
-            if (active) {
-                badge.textContent = 'SUELO ACTIVO';
-                badge.className = 'floor-badge on';
-                card.classList.add('floor-active');
-            } else {
-                badge.textContent = 'SIN SUELO';
-                badge.className = 'floor-badge off';
-                card.classList.remove('floor-active');
-            }
-        }
-
-        function updateRangeLabel(floorActive) {
-            document.getElementById('range_label').textContent =
-                floorActive ? '(elevación máxima sobre suelo)' : '(profundidad)';
-        }
-
-        function updateStatus(data) {
-            document.getElementById('status').innerHTML =
-                `<span>depth_min:</span> ${data.depth_min}<br>
-                 <span>depth_max:</span> ${data.depth_max}<br>
-                 <span>colormap:</span> ${data.colormap}<br>
-                 <span>modo:</span> ${data.mode}<br>
-                 <span>suelo:</span> ${data.floor_active ? 'calibrado ✅' : 'sin calibrar'}`;
-            updateFloorBadge(data.floor_active);
-            updateRangeLabel(data.floor_active);
-        }
-
-        function loadStatus() {
-            fetch('/status').then(r => r.json()).then(data => {
-                document.getElementById('depth_min').value = data.depth_min;
-                document.getElementById('depth_max').value = data.depth_max;
-                document.getElementById('val_min').textContent = data.depth_min;
-                document.getElementById('val_max').textContent = data.depth_max;
-                const idx = ['JET','TURBO','RAINBOW','TOPO'].indexOf(data.colormap);
-                if (idx >= 0) {
-                    document.querySelectorAll('[id^=cm]').forEach(b => b.classList.remove('active'));
-                    document.getElementById('cm' + idx).classList.add('active');
-                }
                 updateStatus(data);
             });
         }
 
+        function toggleStretch() {
+            fetch('/toggle_stretch', {method: 'POST'}).then(r => r.json()).then(data => {
+                updateStatus(data);
+            });
+        }
+
+        function updateStatus(data) {
+            // sliders
+            document.getElementById('depth_min').value = data.depth_min;
+            document.getElementById('depth_max').value = data.depth_max;
+            document.getElementById('val_min').textContent = data.depth_min;
+            document.getElementById('val_max').textContent = data.depth_max;
+
+            // floor badge
+            const badge = document.getElementById('floor_badge');
+            const card  = document.getElementById('floor_card');
+            if (data.floor_active) {
+                badge.textContent = 'SUELO ACTIVO';
+                badge.className = 'badge badge-on';
+                card.classList.add('floor-active');
+            } else {
+                badge.textContent = 'SIN SUELO';
+                badge.className = 'badge badge-off';
+                card.classList.remove('floor-active');
+            }
+
+            // range label
+            document.getElementById('range_label').textContent =
+                data.floor_active ? '(elevación máxima sobre suelo)' : '(profundidad)';
+
+            // live stretch button
+            const btn = document.getElementById('btn_stretch');
+            if (data.live_stretch) {
+                btn.textContent = '⏹ DESACTIVAR LIVE STRETCH';
+                btn.className = 'btn-stretch-on';
+                document.getElementById('stretch_status').textContent = '🟢 Activo — rango se ajusta solo en tiempo real';
+            } else {
+                btn.textContent = '▶ ACTIVAR LIVE STRETCH';
+                btn.className = 'btn-stretch-off';
+                document.getElementById('stretch_status').textContent = 'Desactivado — usa los sliders o Auto Calibrar';
+            }
+
+            // status panel
+            document.getElementById('status').innerHTML =
+                `<span>depth_min:</span> ${data.depth_min}<br>
+                 <span>depth_max:</span> ${data.depth_max}<br>
+                 <span>modo:</span> ${data.mode}<br>
+                 <span>suelo:</span> ${data.floor_active ? 'calibrado ✅' : 'sin calibrar'}<br>
+                 <span>live stretch:</span> ${data.live_stretch ? 'ON 🟢' : 'OFF'}`;
+        }
+
+        function loadStatus() {
+            fetch('/status').then(r => r.json()).then(updateStatus);
+        }
+
         loadStatus();
-        setInterval(loadStatus, 3000);
+        setInterval(loadStatus, 2000);
     </script>
 </body>
 </html>
 '''
 
 
-def _status_payload():
+def _payload():
     return {
-        'depth_min': config['depth_min'],
-        'depth_max': config['depth_max'],
-        'colormap': colormap_names[colormap_idx[0]],
-        'mode': config['mode'],
-        'floor_active': floor_frame[0] is not None
+        'depth_min':    config['depth_min'],
+        'depth_max':    config['depth_max'],
+        'mode':         config['mode'],
+        'floor_active': floor_frame[0] is not None,
+        'live_stretch': live_stretch[0],
     }
 
 
@@ -249,7 +248,7 @@ def index():
 
 @app.route('/status')
 def status():
-    return jsonify(_status_payload())
+    return jsonify(_payload())
 
 
 @app.route('/update', methods=['POST'])
@@ -257,19 +256,13 @@ def update():
     data = request.json
     config['depth_min'] = int(data['depth_min'])
     config['depth_max'] = int(data['depth_max'])
-    return jsonify(_status_payload())
-
-
-@app.route('/colormap', methods=['POST'])
-def set_colormap():
-    colormap_idx[0] = int(request.json['idx'])
-    return jsonify(_status_payload())
+    return jsonify(_payload())
 
 
 @app.route('/mode', methods=['POST'])
 def set_mode():
     config['mode'] = request.json['mode']
-    return jsonify(_status_payload())
+    return jsonify(_payload())
 
 
 @app.route('/save', methods=['POST'])
@@ -281,26 +274,31 @@ def save():
 @app.route('/auto_calibrate', methods=['POST'])
 def auto_calibrate_route():
     auto_calibrate()
-    payload = _status_payload()
-    payload['status'] = auto_calib_status[0]
-    return jsonify(payload)
+    p = _payload()
+    p['status'] = auto_calib_status[0]
+    return jsonify(p)
 
 
 @app.route('/calibrate_floor', methods=['POST'])
 def calibrate_floor_route():
     ok = calibrate_floor()
-    msg = 'Suelo fijado — ahora el colormap muestra solo elevacion' if ok else 'Error: sin datos del Kinect'
-    payload = _status_payload()
-    payload['msg'] = msg
-    return jsonify(payload)
+    p = _payload()
+    p['msg'] = 'Suelo fijado — colormap muestra elevacion sobre la base' if ok else 'Error: sin datos del Kinect'
+    return jsonify(p)
 
 
 @app.route('/reset_floor', methods=['POST'])
 def reset_floor_route():
     reset_floor()
-    payload = _status_payload()
-    payload['msg'] = 'Calibracion de suelo eliminada — modo clasico activo'
-    return jsonify(payload)
+    p = _payload()
+    p['msg'] = 'Calibracion de suelo eliminada — modo clasico activo'
+    return jsonify(p)
+
+
+@app.route('/toggle_stretch', methods=['POST'])
+def toggle_stretch():
+    live_stretch[0] = not live_stretch[0]
+    return jsonify(_payload())
 
 
 def run_flask():

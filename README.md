@@ -85,9 +85,13 @@ The OpenCV window opens fullscreen on the primary display. The web interface sta
 4. Press **"Auto Calibrar Rango"** — detects the sand pile height and stretches the colormap to match.
 5. Switch to **Exhibición** mode to hide the calibration overlay.
 
+### Live Auto-Stretch
+
+Enable **Live Auto-Stretch** to have the colormap adjust its range automatically on every frame — no manual tuning needed while shaping sand. Uses exponential smoothing to avoid flickering.
+
 ### Manual fine-tuning
 
-Use the `depth_min` / `depth_max` sliders to adjust contrast. In floor mode these control the **maximum expected elevation** (in Kinect units). Decrease the range for more contrast on shallow piles; increase it for tall features.
+Use the `depth_min` / `depth_max` sliders for precise control. In floor mode these set the **maximum expected elevation** (in Kinect units). Decrease for more contrast on shallow piles; increase for tall features.
 
 ---
 
@@ -97,24 +101,25 @@ Accessible from any phone, tablet, or computer on the same network.
 
 | Control | Description |
 |---|---|
+| Live Auto-Stretch | Continuously fits the colormap to the current elevation range |
 | Fijar Suelo Plano | Capture empty surface as elevation baseline |
 | Quitar Calibración | Revert to classic depth mode |
-| Auto Calibrar Rango | Auto-detect range from current frame |
+| Auto Calibrar Rango | One-shot range detection from current frame |
 | depth_min / depth_max | Manual range adjustment |
-| Colormap | JET · TURBO · RAINBOW · TOPO (custom) |
 | Calibración / Exhibición | Toggle on-screen debug overlay |
 | Guardar Configuración | Persist settings to `~/sandbox_config.json` |
 
 ---
 
-## Colormaps
+## Colormap — TOPO
 
-| Name | Description |
-|---|---|
-| JET | Classic blue→red gradient |
-| TURBO | Improved perceptual version of JET |
-| RAINBOW | Full spectrum |
-| TOPO | Custom hand-crafted topographic palette — deep blue (low) → green → orange → white (high) |
+A custom hand-crafted topographic palette inspired by real relief maps:
+
+```
+low elevation → deep blue → cyan → green → yellow-green → orange → red → white → high elevation
+```
+
+This mimics natural geography: blue for valleys/water, green for plains, orange for hills, red/white for peaks — exactly what people expect to see in a topographic map.
 
 ---
 

@@ -1,21 +1,51 @@
 import cv2
 import numpy as np
 
-from config import config, colormap_idx, colormap_names, last_depth_frame, floor_frame, auto_calib_status, DISPLAY_WIDTH, DISPLAY_HEIGHT
+from config import config, last_depth_frame, floor_frame, live_stretch, auto_calib_status, DISPLAY_WIDTH, DISPLAY_HEIGHT
 from colormap import apply_colormap
+
+_stretch_tick = [0]
+
+
+def _update_live_stretch(depth):
+    """Recalcula el rango cada 5 frames con suavizado exponencial para evitar parpadeo."""
+    _stretch_tick[0] = (_stretch_tick[0] + 1) % 5
+    if _stretch_tick[0] != 0:
+        return
+
+    alpha = 0.15  # qué tan rápido se adapta (0.1 = lento/suave, 0.3 = rápido)
+
+    if floor_frame[0] is not None:
+        elev = np.clip(floor_frame[0] - depth, 0, None)
+        valid = elev[elev > 8]
+        if len(valid) < 500:
+            return
+        new_max = max(int(np.percentile(valid, 97)), 20)
+        config['depth_max'] = int(alpha * new_max + (1 - alpha) * config['depth_max'])
+        config['depth_min'] = 0
+    else:
+        valid = depth[(depth > 0) & (depth < 2047)]
+        if len(valid) < 500:
+            return
+        new_min = max(0, int(np.percentile(valid, 2)) - 5)
+        new_max = min(2047, int(np.percentile(valid, 98)) + 5)
+        config['depth_min'] = int(alpha * new_min + (1 - alpha) * config['depth_min'])
+        config['depth_max'] = int(alpha * new_max + (1 - alpha) * config['depth_max'])
 
 
 def draw_calibration_ui(frame):
     overlay = frame.copy()
-    cv2.rectangle(overlay, (10, 10), (500, 160), (0, 0, 0), -1)
+    cv2.rectangle(overlay, (10, 10), (520, 175), (0, 0, 0), -1)
     cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
     mode_label = 'MODO: ELEVACION SUELO' if floor_frame[0] is not None else 'MODO CALIBRACION'
     cv2.putText(frame, mode_label, (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
     cv2.putText(frame, f'depth_min: {config["depth_min"]}', (20, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
     cv2.putText(frame, f'depth_max: {config["depth_max"]}', (20, 105), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
-    cv2.putText(frame, f'colormap: {colormap_names[colormap_idx[0]]}', (20, 130), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
     floor_txt = 'suelo: calibrado' if floor_frame[0] is not None else 'suelo: sin calibrar'
-    cv2.putText(frame, floor_txt, (20, 155), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 200, 255), 1)
+    cv2.putText(frame, floor_txt, (20, 135), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 255), 1)
+    stretch_txt = 'live stretch: ON' if live_stretch[0] else 'live stretch: OFF'
+    stretch_color = (0, 255, 100) if live_stretch[0] else (150, 150, 150)
+    cv2.putText(frame, stretch_txt, (20, 165), cv2.FONT_HERSHEY_SIMPLEX, 0.5, stretch_color, 1)
     return frame
 
 
@@ -23,8 +53,10 @@ def get_depth(dev, data, timestamp):
     last_depth_frame[0] = data.copy()
     depth = data.astype(np.float32)
 
+    if live_stretch[0]:
+        _update_live_stretch(depth)
+
     if floor_frame[0] is not None:
-        # Elevación relativa al suelo: positivo = más cerca del sensor = más alto
         elev = np.clip(floor_frame[0] - depth, 0, None)
         height_range = max(1, config['depth_max'] - config['depth_min'])
         depth_norm = np.clip(elev / height_range, 0.0, 1.0)
@@ -33,7 +65,7 @@ def get_depth(dev, data, timestamp):
         depth_norm = 1.0 - np.clip((depth - config['depth_min']) / rng, 0.0, 1.0)
 
     gray = (depth_norm * 255).astype(np.uint8)
-    color = apply_colormap(gray, colormap_idx[0])
+    color = apply_colormap(gray)
     color = cv2.resize(color, (DISPLAY_WIDTH, DISPLAY_HEIGHT))
     if config['mode'] == 'calibration':
         color = draw_calibration_ui(color)
@@ -64,9 +96,8 @@ def auto_calibrate():
     depth = last_depth_frame[0].astype(np.float32)
 
     if floor_frame[0] is not None:
-        # Modo elevación: calcular rango de altura sobre el suelo
         elev = np.clip(floor_frame[0] - depth, 0, None)
-        valid_elev = elev[elev > 8]  # ignorar ruido del suelo
+        valid_elev = elev[elev > 8]
         if len(valid_elev) == 0:
             config['depth_min'] = 0
             config['depth_max'] = 100
@@ -77,7 +108,6 @@ def auto_calibrate():
         config['depth_max'] = max(max_elev + 20, 30)
         auto_calib_status[0] = f'OK: elevacion 0-{config["depth_max"]} unidades'
     else:
-        # Modo clásico: percentiles para mejor detección de rango
         valid = depth[(depth > 0) & (depth < 2047)]
         if len(valid) == 0:
             auto_calib_status[0] = 'Error: sin datos validos'

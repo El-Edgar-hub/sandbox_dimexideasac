@@ -11,10 +11,9 @@ config = {
     'mode': 'calibration'
 }
 
-colormap_idx = [0]
-colormap_names = ['JET', 'TURBO', 'RAINBOW', 'TOPO']
 last_depth_frame = [None]
 floor_frame = [None]
+live_stretch = [False]
 auto_calib_status = ['Listo']
 
 
