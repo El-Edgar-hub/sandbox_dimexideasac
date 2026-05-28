@@ -203,7 +203,8 @@ HTML = '''
             if (data.live_stretch) {
                 btn.textContent = '⏹ DESACTIVAR LIVE STRETCH';
                 btn.className = 'btn-stretch-on';
-                document.getElementById('stretch_status').textContent = '🟢 Activo — rango se ajusta solo en tiempo real';
+                const warn = !data.floor_active ? ' ⚠️ Primero fija el suelo para mejores resultados' : '';
+                document.getElementById('stretch_status').textContent = '🟢 Activo — rango se ajusta solo en tiempo real' + warn;
             } else {
                 btn.textContent = '▶ ACTIVAR LIVE STRETCH';
                 btn.className = 'btn-stretch-off';

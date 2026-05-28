@@ -53,6 +53,8 @@ def get_depth(dev, data, timestamp):
     last_depth_frame[0] = data.copy()
     depth = data.astype(np.float32)
 
+    invalid = (data == 0) | (data == 2047)
+
     if live_stretch[0]:
         _update_live_stretch(depth)
 
@@ -63,6 +65,9 @@ def get_depth(dev, data, timestamp):
     else:
         rng = max(1, config['depth_max'] - config['depth_min'])
         depth_norm = 1.0 - np.clip((depth - config['depth_min']) / rng, 0.0, 1.0)
+
+    # Pixels inválidos (sin lectura del sensor) → nivel cero = azul oscuro del TOPO
+    depth_norm[invalid] = 0.0
 
     gray = (depth_norm * 255).astype(np.uint8)
     color = apply_colormap(gray)
