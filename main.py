@@ -3,6 +3,8 @@ import numpy as np
 import cv2
 import json
 import os
+import threading
+import sys
 
 DISPLAY_WIDTH = 1920
 DISPLAY_HEIGHT = 1080
@@ -86,7 +88,42 @@ def get_depth(dev, data, timestamp):
 def get_video(dev, data, timestamp):
     pass
 
+def command_listener():
+    print("Comandos: a/z=depth_min, s/x=depth_max, c=color, g=guardar, e=exhibicion, b=calibracion")
+    while True:
+        cmd = input("cmd> ").strip()
+        if cmd == 'a':
+            config['depth_min'] = max(0, config['depth_min'] - 50)
+            print(f"depth_min: {config['depth_min']}")
+        elif cmd == 'z':
+            config['depth_min'] = min(config['depth_max']-50, config['depth_min'] + 50)
+            print(f"depth_min: {config['depth_min']}")
+        elif cmd == 's':
+            config['depth_max'] = max(config['depth_min']+50, config['depth_max'] - 50)
+            print(f"depth_max: {config['depth_max']}")
+        elif cmd == 'x':
+            config['depth_max'] = min(4000, config['depth_max'] + 50)
+            print(f"depth_max: {config['depth_max']}")
+        elif cmd == 'c':
+            colormap_idx[0] = (colormap_idx[0] + 1) % len(colormaps)
+            print(f"Colormap: {colormap_names[colormap_idx[0]]}")
+        elif cmd == 'g':
+            save_config()
+        elif cmd == 'e':
+            config['mode'] = 'exhibition'
+            print('Modo exhibición')
+        elif cmd == 'b':
+            config['mode'] = 'calibration'
+            print('Modo calibración')
+        elif cmd == 'q':
+            freenect.kill_runloop()
+            break
+
 load_config()
+
+t = threading.Thread(target=command_listener, daemon=True)
+t.start()
+
 cv2.namedWindow('Sandbox', cv2.WINDOW_NORMAL)
 cv2.moveWindow('Sandbox', 0, 0)
 cv2.resizeWindow('Sandbox', DISPLAY_WIDTH, DISPLAY_HEIGHT)
