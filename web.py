@@ -302,5 +302,29 @@ def toggle_stretch():
     return jsonify(_payload())
 
 
+
+@app.route('/depth_stats')
+def depth_stats():
+    from config import last_depth_frame, floor_frame, config
+    import numpy as np
+    if last_depth_frame[0] is None:
+        return jsonify({'error': 'no data'})
+    d = last_depth_frame[0].astype(float)
+    valid = d[(d > 0) & (d < 2047)]
+    h, w = d.shape
+    cx, cy = w//2, h//2
+    center = d[cy-20:cy+20, cx-20:cx+20]
+    cv = center[(center>0)&(center<2047)]
+    result = {
+        'frame_min': int(valid.min()) if len(valid) else -1,
+        'frame_max': int(valid.max()) if len(valid) else -1,
+        'frame_mean': int(valid.mean()) if len(valid) else -1,
+        'center_mean': int(cv.mean()) if len(cv) else -1,
+        'center_min': int(cv.min()) if len(cv) else -1,
+        'valid_pct': round(len(valid)/d.size*100, 1),
+        'floor_center': int(floor_frame[0][cy-20:cy+20, cx-20:cx+20].mean()) if floor_frame[0] is not None else -1,
+    }
+    return jsonify(result)
+
 def run_flask():
     app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)

@@ -8,12 +8,11 @@ _stretch_tick = [0]
 
 
 def _update_live_stretch(depth):
-    """Recalcula el rango cada 5 frames con suavizado exponencial para evitar parpadeo."""
     _stretch_tick[0] = (_stretch_tick[0] + 1) % 5
     if _stretch_tick[0] != 0:
         return
 
-    alpha = 0.15  # qué tan rápido se adapta (0.1 = lento/suave, 0.3 = rápido)
+    alpha = 0.15
 
     if floor_frame[0] is not None:
         elev = np.clip(floor_frame[0] - depth, 0, None)
@@ -64,9 +63,11 @@ def get_depth(dev, data, timestamp):
         depth_norm = np.clip(elev / height_range, 0.0, 1.0)
     else:
         rng = max(1, config['depth_max'] - config['depth_min'])
+        # depth_max = base (valor alto, lejos del Kinect)
+        # depth_min = elevacion maxima (valor bajo, cerca del Kinect)
+        # objetos mas lejanos que depth_max se mapean a 0 (azul oscuro)
         depth_norm = 1.0 - np.clip((depth - config['depth_min']) / rng, 0.0, 1.0)
 
-    # Pixels inválidos (sin lectura del sensor) → nivel cero = azul oscuro del TOPO
     depth_norm[invalid] = 0.0
 
     gray = (depth_norm * 255).astype(np.uint8)
