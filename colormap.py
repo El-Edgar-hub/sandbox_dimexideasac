@@ -3,15 +3,16 @@ import numpy as np
 
 
 def make_topo_colormap():
+    # Colors in BGR order (OpenCV convention)
     colors = [
-        (0,   [0,   0,   80]),
-        (60,  [0,   60,  180]),
-        (100, [0,   160, 200]),
-        (140, [0,   180, 80]),
-        (180, [180, 210, 0]),
-        (210, [255, 160, 0]),
-        (240, [200, 0,   0]),
-        (255, [255, 255, 255]),
+        (0,   [80,  0,   0  ]),  # dark blue
+        (60,  [180, 60,  0  ]),  # blue
+        (100, [200, 160, 0  ]),  # cyan
+        (140, [80,  180, 0  ]),  # green
+        (180, [0,   210, 180]),  # yellow-green
+        (210, [0,   160, 255]),  # orange
+        (240, [0,   0,   200]),  # red
+        (255, [255, 255, 255]),  # white
     ]
     lut = np.zeros((256, 1, 3), dtype=np.uint8)
     for i in range(len(colors) - 1):
