@@ -1,7 +1,10 @@
 import cv2
 import numpy as np
 
-from config import config, last_depth_frame, floor_frame, live_stretch, auto_calib_status, DISPLAY_WIDTH, DISPLAY_HEIGHT
+from config import (
+    config, last_depth_frame, floor_frame, live_stretch, auto_calib_status,
+    homography_step, homography_points, DISPLAY_WIDTH, DISPLAY_HEIGHT, HOMOGRAPHY_TARGETS,
+)
 from colormap import apply_colormap
 
 _stretch_tick = [0]
@@ -48,6 +51,16 @@ def draw_calibration_ui(frame):
     return frame
 
 
+def draw_corner_target(frame, step):
+    tx, ty = HOMOGRAPHY_TARGETS[step]
+    cv2.drawMarker(frame, (tx, ty), (0, 0, 255), cv2.MARKER_CROSS, 60, 4)
+    cv2.circle(frame, (tx, ty), 36, (0, 0, 255), 3)
+    label = f'Coloca tu mano aqui - esquina {step + 1}/4'
+    cv2.rectangle(frame, (0, 0), (frame.shape[1], 50), (0, 0, 0), -1)
+    cv2.putText(frame, label, (20, 34), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2)
+    return frame
+
+
 def get_depth(dev, data, timestamp):
     last_depth_frame[0] = data.copy()
     depth = data.astype(np.float32)
@@ -72,10 +85,20 @@ def get_depth(dev, data, timestamp):
 
     gray = (depth_norm * 255).astype(np.uint8)
     color = apply_colormap(gray)
-    color = cv2.resize(color, (DISPLAY_WIDTH, DISPLAY_HEIGHT))
-    if config['mode'] == 'calibration':
-        color = draw_calibration_ui(color)
-    cv2.imshow('Sandbox', color)
+
+    homography = config.get('homography')
+    if homography is not None:
+        h_matrix = np.array(homography, dtype=np.float32)
+        display = cv2.warpPerspective(color, h_matrix, (DISPLAY_WIDTH, DISPLAY_HEIGHT))
+    else:
+        display = cv2.resize(color, (DISPLAY_WIDTH, DISPLAY_HEIGHT))
+
+    if homography_step[0] >= 0:
+        display = draw_corner_target(display, homography_step[0])
+    elif config['mode'] == 'calibration':
+        display = draw_calibration_ui(display)
+
+    cv2.imshow('Sandbox', display)
     cv2.waitKey(1)
 
 
@@ -92,6 +115,69 @@ def calibrate_floor():
 
 def reset_floor():
     floor_frame[0] = None
+
+
+def _find_marker_point():
+    """Ubica en espacio Kinect (x,y) el punto mas cercano/elevado del frame actual (la mano)."""
+    if last_depth_frame[0] is None:
+        return None
+    d = last_depth_frame[0].astype(np.float32)
+    valid = (d > 0) & (d < 2047)
+    if not np.any(valid):
+        return None
+
+    if floor_frame[0] is not None:
+        elev = np.where(valid, floor_frame[0] - d, -1.0)
+        y, x = np.unravel_index(np.argmax(elev), elev.shape)
+        if elev[y, x] < 15:
+            return None
+    else:
+        masked = np.where(valid, d, np.inf)
+        y, x = np.unravel_index(np.argmin(masked), masked.shape)
+        if not np.isfinite(masked[y, x]):
+            return None
+
+    return int(x), int(y)
+
+
+def start_homography_calibration():
+    homography_points[0] = []
+    homography_step[0] = 0
+
+
+def cancel_homography_calibration():
+    homography_step[0] = -1
+    homography_points[0] = []
+
+
+def capture_homography_point():
+    step = homography_step[0]
+    if step < 0 or step > 3:
+        return {'error': 'calibracion no iniciada'}
+
+    point = _find_marker_point()
+    if point is None:
+        return {'error': 'no se detecto nada sobre la arena, intenta de nuevo'}
+
+    homography_points[0].append(point)
+
+    if step == 3:
+        kinect_pts = np.array(homography_points[0], dtype=np.float32)
+        screen_pts = np.array(HOMOGRAPHY_TARGETS, dtype=np.float32)
+        h_matrix = cv2.getPerspectiveTransform(kinect_pts, screen_pts)
+        config['homography'] = h_matrix.tolist()
+        homography_step[0] = -1
+        homography_points[0] = []
+        return {'done': True}
+
+    homography_step[0] = step + 1
+    return {'done': False, 'next_step': homography_step[0]}
+
+
+def reset_homography():
+    config['homography'] = None
+    homography_step[0] = -1
+    homography_points[0] = []
 
 
 def auto_calibrate():

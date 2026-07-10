@@ -1,8 +1,11 @@
 import numpy as np
 from flask import Flask, render_template_string, request, jsonify
 
-from config import config, auto_calib_status, floor_frame, live_stretch, save_config, last_depth_frame
-from kinect import auto_calibrate, calibrate_floor, reset_floor
+from config import config, auto_calib_status, floor_frame, live_stretch, save_config, last_depth_frame, homography_step
+from kinect import (
+    auto_calibrate, calibrate_floor, reset_floor,
+    start_homography_calibration, capture_homography_point, reset_homography,
+)
 
 app = Flask(__name__)
 
@@ -53,6 +56,8 @@ HTML = '''<!DOCTYPE html>
     .btn-capture:active{opacity:.7}
     .btn-base{background:#1d4ed8;color:#fff}
     .btn-height{background:#7c3aed;color:#fff}
+    .btn-geo{background:#0891b2;color:#fff}
+    .btn-geo-reset{background:#374151;color:#e5e7eb}
     .btn-capture:disabled{opacity:.45;cursor:not-allowed}
 
     /* FINE TUNE */
@@ -134,6 +139,19 @@ HTML = '''<!DOCTYPE html>
   <div class="feedback" id="fb-height"></div>
 </div>
 
+<!-- PASO 3: GEOMETRIA -->
+<div class="step-card" id="step3">
+  <div class="step-header">
+    <div class="step-num" id="num3">3</div>
+    <div class="step-title">Calibrar Geometría</div>
+  </div>
+  <p class="step-desc" id="geo-desc">Alinea la imagen proyectada con la posición real de la arena marcando las 4 esquinas con la mano.</p>
+  <button class="btn-capture btn-geo" id="btn-geo-start" onclick="startHomography()">🎯 Iniciar Calibración de Esquinas</button>
+  <button class="btn-capture btn-geo" id="btn-geo-capture" onclick="captureCorner()" style="display:none">✋ Capturar Esquina</button>
+  <button class="btn-capture btn-geo-reset" id="btn-geo-reset" onclick="resetHomography()" style="display:none">↺ Reiniciar Geometría</button>
+  <div class="feedback" id="fb-geo"></div>
+</div>
+
 <!-- FOOTER -->
 <div class="footer">
   <button class="btn-save" onclick="save()">💾 Guardar</button>
@@ -180,6 +198,68 @@ HTML = '''<!DOCTYPE html>
     } else {
       pill.textContent = 'CALIBRACIÓN';
       pill.className = 'pill pill-calib';
+    }
+    if (data.homography_active !== undefined) refreshGeoUI(data);
+  }
+
+  function startHomography() {
+    fetch('/start_homography', {method:'POST'}).then(function(r){ return r.json(); }).then(function(data){
+      updateConfig(data);
+      setFeedback('fb-geo', 'Esquina 1/4 — coloca tu mano sobre la marca roja proyectada', 'ok');
+    });
+  }
+
+  function captureCorner() {
+    var btn = document.getElementById('btn-geo-capture');
+    btn.disabled = true; btn.textContent = '⏳ Capturando...';
+    fetch('/capture_homography_point', {method:'POST'}).then(function(r){ return r.json(); }).then(function(data){
+      btn.disabled = false; btn.textContent = '✋ Capturar Esquina';
+      if (data.error) { setFeedback('fb-geo', '✗ ' + data.error, 'err'); return; }
+      updateConfig(data);
+      if (data.done) {
+        setFeedback('fb-geo', '✓ Geometría calibrada', 'ok');
+      } else {
+        setFeedback('fb-geo', 'Esquina ' + (data.next_step + 1) + '/4 — mueve la mano a la nueva marca y captura', 'ok');
+      }
+    }).catch(function(){ btn.disabled=false; btn.textContent='✋ Capturar Esquina'; });
+  }
+
+  function resetHomography() {
+    fetch('/reset_homography', {method:'POST'}).then(function(r){ return r.json(); }).then(function(data){
+      updateConfig(data);
+      setFeedback('fb-geo', 'Geometría reiniciada', 'warn');
+    });
+  }
+
+  function refreshGeoUI(data) {
+    var start   = document.getElementById('btn-geo-start');
+    var capture = document.getElementById('btn-geo-capture');
+    var reset   = document.getElementById('btn-geo-reset');
+    var step3   = document.getElementById('step3');
+    var num3    = document.getElementById('num3');
+    var desc    = document.getElementById('geo-desc');
+
+    if (data.homography_active) {
+      start.style.display = 'none';
+      capture.style.display = 'none';
+      reset.style.display = 'block';
+      step3.classList.add('done');
+      num3.textContent = '✓';
+      desc.textContent = 'Geometría calibrada — la proyección está alineada con la arena.';
+    } else if (data.homography_step >= 0) {
+      start.style.display = 'none';
+      capture.style.display = 'block';
+      reset.style.display = 'block';
+      step3.classList.remove('done');
+      num3.textContent = '3';
+      desc.textContent = 'Coloca tu mano sobre la marca roja proyectada (esquina ' + (data.homography_step + 1) + '/4) y presiona Capturar Esquina.';
+    } else {
+      start.style.display = 'block';
+      capture.style.display = 'none';
+      reset.style.display = 'none';
+      step3.classList.remove('done');
+      num3.textContent = '3';
+      desc.textContent = 'Alinea la imagen proyectada con la posición real de la arena marcando las 4 esquinas con la mano.';
     }
   }
 
@@ -276,11 +356,13 @@ HTML = '''<!DOCTYPE html>
 
 def _payload():
     return {
-        'depth_min':    config['depth_min'],
-        'depth_max':    config['depth_max'],
-        'mode':         config['mode'],
-        'floor_active': floor_frame[0] is not None,
-        'live_stretch': live_stretch[0],
+        'depth_min':        config['depth_min'],
+        'depth_max':        config['depth_max'],
+        'mode':             config['mode'],
+        'floor_active':     floor_frame[0] is not None,
+        'live_stretch':     live_stretch[0],
+        'homography_active': config.get('homography') is not None,
+        'homography_step':   homography_step[0],
     }
 
 
@@ -405,6 +487,26 @@ def reset_floor_route():
 @app.route('/toggle_stretch', methods=['POST'])
 def toggle_stretch():
     live_stretch[0] = not live_stretch[0]
+    return jsonify(_payload())
+
+
+@app.route('/start_homography', methods=['POST'])
+def start_homography_route():
+    start_homography_calibration()
+    return jsonify(_payload())
+
+
+@app.route('/capture_homography_point', methods=['POST'])
+def capture_homography_point_route():
+    result = capture_homography_point()
+    p = _payload()
+    p.update(result)
+    return jsonify(p)
+
+
+@app.route('/reset_homography', methods=['POST'])
+def reset_homography_route():
+    reset_homography()
     return jsonify(_payload())
 
 
