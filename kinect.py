@@ -1,3 +1,5 @@
+import time
+
 import cv2
 import numpy as np
 
@@ -147,6 +149,30 @@ def _find_marker_point():
     return int(x), int(y)
 
 
+def _capture_stable_point(samples=6, interval=0.08, max_spread=12):
+    """Muestrea varios frames en una ventana corta y solo acepta el punto si
+    coinciden entre si -- tolera el retraso entre el clic del usuario y el
+    momento real en que el servidor procesa el pedido (WiFi con jitter),
+    y de paso filtra una lectura puntual corrupta por ruido del Kinect."""
+    points = []
+    for _ in range(samples):
+        p = _find_marker_point()
+        if p is not None:
+            points.append(p)
+        time.sleep(interval)
+
+    if len(points) < max(3, samples // 2):
+        return None
+
+    arr = np.array(points, dtype=np.float32)
+    center = arr.mean(axis=0)
+    spread = float(np.max(np.linalg.norm(arr - center, axis=1)))
+    if spread > max_spread:
+        return None
+
+    return int(round(center[0])), int(round(center[1]))
+
+
 def _polygon_area(points):
     """Area de un poligono via formula del shoelace -- sirve para detectar
     esquinas capturadas demasiado juntas, casi colineales, o en orden
@@ -180,9 +206,9 @@ def capture_homography_point():
     if step < 0 or step > 3:
         return {'error': 'calibracion no iniciada'}
 
-    point = _find_marker_point()
+    point = _capture_stable_point()
     if point is None:
-        return {'error': 'no se detecto la mano sobre la arena, intenta de nuevo'}
+        return {'error': 'mantén la mano firme sobre la marca un momento e intenta de nuevo'}
 
     homography_points[0].append(point)
     print(f'[homografia] esquina {step + 1}/4 capturada en {point}')
