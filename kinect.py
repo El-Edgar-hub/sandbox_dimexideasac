@@ -138,10 +138,26 @@ def _find_marker_point():
 
     elev = np.where(valid, ref - d, -1.0)
     y, x = np.unravel_index(np.argmax(elev), elev.shape)
-    if elev[y, x] < 15:
+    peak = elev[y, x]
+    # Descarta lecturas demasiado bajas (nada ahi) o absurdamente altas
+    # (probablemente ruido/paquete corrupto del Kinect, no una mano real).
+    if peak < 15 or peak > 300:
         return None
 
     return int(x), int(y)
+
+
+def _polygon_area(points):
+    """Area de un poligono via formula del shoelace -- sirve para detectar
+    esquinas capturadas demasiado juntas, casi colineales, o en orden
+    cruzado (que producen homografias degeneradas)."""
+    n = len(points)
+    area = 0.0
+    for i in range(n):
+        x1, y1 = points[i]
+        x2, y2 = points[(i + 1) % n]
+        area += x1 * y2 - x2 * y1
+    return abs(area) / 2.0
 
 
 def start_homography_calibration():
@@ -169,12 +185,25 @@ def capture_homography_point():
         return {'error': 'no se detecto la mano sobre la arena, intenta de nuevo'}
 
     homography_points[0].append(point)
+    print(f'[homografia] esquina {step + 1}/4 capturada en {point}')
 
     if step == 3:
-        kinect_pts = np.array(homography_points[0], dtype=np.float32)
+        pts = homography_points[0]
+        area = _polygon_area(pts)
+        frame_area = last_depth_frame[0].shape[0] * last_depth_frame[0].shape[1]
+        min_area = frame_area * 0.08
+        if area < min_area:
+            print(f'[homografia] RECHAZADA: puntos={pts} area={area:.0f}px2 (minimo {min_area:.0f}px2)')
+            homography_step[0] = -1
+            homography_points[0] = []
+            homography_floor[0] = None
+            return {'error': f'las 4 esquinas quedaron muy juntas o en orden incorrecto (area={int(area)}px²). Vuelve a iniciar y sigue con cuidado cada marca proyectada, en orden.'}
+
+        kinect_pts = np.array(pts, dtype=np.float32)
         screen_pts = np.array(HOMOGRAPHY_TARGETS, dtype=np.float32)
         h_matrix = cv2.getPerspectiveTransform(kinect_pts, screen_pts)
         config['homography'] = h_matrix.tolist()
+        print(f'[homografia] CALIBRADA OK: puntos={pts} area={area:.0f}px2')
         homography_step[0] = -1
         homography_points[0] = []
         homography_floor[0] = None
