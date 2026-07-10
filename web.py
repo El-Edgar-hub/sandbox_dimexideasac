@@ -205,6 +205,7 @@ HTML = '''<!DOCTYPE html>
   function startHomography() {
     fetch('/start_homography', {method:'POST'}).then(function(r){ return r.json(); }).then(function(data){
       updateConfig(data);
+      if (data.error) { setFeedback('fb-geo', '✗ ' + data.error, 'err'); return; }
       setFeedback('fb-geo', 'Esquina 1/4 — coloca tu mano sobre la marca roja proyectada', 'ok');
     });
   }
@@ -492,8 +493,11 @@ def toggle_stretch():
 
 @app.route('/start_homography', methods=['POST'])
 def start_homography_route():
-    start_homography_calibration()
-    return jsonify(_payload())
+    ok = start_homography_calibration()
+    p = _payload()
+    if not ok:
+        p['error'] = 'sin datos del Kinect'
+    return jsonify(p)
 
 
 @app.route('/capture_homography_point', methods=['POST'])

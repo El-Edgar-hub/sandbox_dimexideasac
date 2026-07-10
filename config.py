@@ -28,6 +28,8 @@ live_stretch = [False]
 auto_calib_status = ['Listo']
 homography_step = [-1]      # -1 = inactivo, 0..3 = esperando captura de esa esquina
 homography_points = [[]]    # puntos Kinect (x,y) capturados hasta ahora
+homography_floor = [None]   # referencia de suelo plano solo para detectar la mano
+                             # durante la calibracion de esquinas (no afecta el render)
 
 
 def load_config():

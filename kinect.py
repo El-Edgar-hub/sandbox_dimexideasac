@@ -3,7 +3,8 @@ import numpy as np
 
 from config import (
     config, last_depth_frame, floor_frame, live_stretch, auto_calib_status,
-    homography_step, homography_points, DISPLAY_WIDTH, DISPLAY_HEIGHT, HOMOGRAPHY_TARGETS,
+    homography_step, homography_points, homography_floor,
+    DISPLAY_WIDTH, DISPLAY_HEIGHT, HOMOGRAPHY_TARGETS,
 )
 from colormap import apply_colormap
 
@@ -118,7 +119,12 @@ def reset_floor():
 
 
 def _find_marker_point():
-    """Ubica en espacio Kinect (x,y) el punto mas cercano/elevado del frame actual (la mano)."""
+    """Ubica en espacio Kinect (x,y) el punto mas elevado del frame actual (la mano).
+
+    Requiere una referencia de suelo plano (homography_floor, o floor_frame si
+    ya esta activo) para poder distinguir la mano de estructura fija mas
+    cercana al Kinect que la arena (p.ej. el borde de madera de la caja).
+    """
     if last_depth_frame[0] is None:
         return None
     d = last_depth_frame[0].astype(np.float32)
@@ -126,28 +132,31 @@ def _find_marker_point():
     if not np.any(valid):
         return None
 
-    if floor_frame[0] is not None:
-        elev = np.where(valid, floor_frame[0] - d, -1.0)
-        y, x = np.unravel_index(np.argmax(elev), elev.shape)
-        if elev[y, x] < 15:
-            return None
-    else:
-        masked = np.where(valid, d, np.inf)
-        y, x = np.unravel_index(np.argmin(masked), masked.shape)
-        if not np.isfinite(masked[y, x]):
-            return None
+    ref = homography_floor[0] if homography_floor[0] is not None else floor_frame[0]
+    if ref is None:
+        return None
+
+    elev = np.where(valid, ref - d, -1.0)
+    y, x = np.unravel_index(np.argmax(elev), elev.shape)
+    if elev[y, x] < 15:
+        return None
 
     return int(x), int(y)
 
 
 def start_homography_calibration():
+    if last_depth_frame[0] is None:
+        return False
+    homography_floor[0] = last_depth_frame[0].astype(np.float32)
     homography_points[0] = []
     homography_step[0] = 0
+    return True
 
 
 def cancel_homography_calibration():
     homography_step[0] = -1
     homography_points[0] = []
+    homography_floor[0] = None
 
 
 def capture_homography_point():
@@ -157,7 +166,7 @@ def capture_homography_point():
 
     point = _find_marker_point()
     if point is None:
-        return {'error': 'no se detecto nada sobre la arena, intenta de nuevo'}
+        return {'error': 'no se detecto la mano sobre la arena, intenta de nuevo'}
 
     homography_points[0].append(point)
 
@@ -168,6 +177,7 @@ def capture_homography_point():
         config['homography'] = h_matrix.tolist()
         homography_step[0] = -1
         homography_points[0] = []
+        homography_floor[0] = None
         return {'done': True}
 
     homography_step[0] = step + 1
@@ -178,6 +188,7 @@ def reset_homography():
     config['homography'] = None
     homography_step[0] = -1
     homography_points[0] = []
+    homography_floor[0] = None
 
 
 def auto_calibrate():
