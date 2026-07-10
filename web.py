@@ -145,7 +145,7 @@ HTML = '''<!DOCTYPE html>
     <div class="step-num" id="num3">3</div>
     <div class="step-title">Calibrar Geometría</div>
   </div>
-  <p class="step-desc" id="geo-desc">Alinea la imagen proyectada con la posición real de la arena marcando las 4 esquinas con la mano.</p>
+  <p class="step-desc" id="geo-desc">Alinea la imagen proyectada con la posición real de la arena. Usa <b>un solo dedo</b> (no la palma abierta) a unos <b>8-10 cm</b> sobre la arena — bajo, para minimizar el paralaje — y mantenlo quieto sobre cada marca roja que verás proyectada.</p>
   <button class="btn-capture btn-geo" id="btn-geo-start" onclick="startHomography()">🎯 Iniciar Calibración de Esquinas</button>
   <button class="btn-capture btn-geo" id="btn-geo-capture" onclick="captureCorner()" style="display:none">✋ Capturar Esquina</button>
   <button class="btn-capture btn-geo-reset" id="btn-geo-reset" onclick="resetHomography()" style="display:none">↺ Reiniciar Geometría</button>

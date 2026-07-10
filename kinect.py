@@ -58,9 +58,11 @@ def draw_corner_target(frame, step):
     tx, ty = HOMOGRAPHY_TARGETS[step]
     cv2.drawMarker(frame, (tx, ty), (0, 0, 255), cv2.MARKER_CROSS, 60, 4)
     cv2.circle(frame, (tx, ty), 36, (0, 0, 255), 3)
-    label = f'Coloca tu mano aqui - esquina {step + 1}/4'
-    cv2.rectangle(frame, (0, 0), (frame.shape[1], 50), (0, 0, 0), -1)
-    cv2.putText(frame, label, (20, 34), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2)
+    line1 = f'Esquina {step + 1}/4 - un dedo (no la palma) sobre la marca'
+    line2 = 'Bajo, ~8-10cm de la arena, quieto un momento'
+    cv2.rectangle(frame, (0, 0), (frame.shape[1], 85), (0, 0, 0), -1)
+    cv2.putText(frame, line1, (20, 34), cv2.FONT_HERSHEY_SIMPLEX, 0.85, (255, 255, 255), 2)
+    cv2.putText(frame, line2, (20, 68), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 255), 2)
     return frame
 
 
