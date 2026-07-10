@@ -140,12 +140,17 @@ def _find_marker_point():
     if ref is None:
         return None
 
-    elev = np.where(valid, ref - d, -1.0)
-    y, x = np.unravel_index(np.argmax(elev), elev.shape)
-    peak = elev[y, x]
+    elev = np.where(valid, ref - d, 0.0).astype(np.float32)
+    # Suaviza antes de buscar el maximo: un pixel muerto/defectuoso del sensor
+    # produce un pico aislado de un solo pixel que un promedio local aplasta,
+    # mientras que una mano real (un blob de muchos pixeles elevados) sobrevive.
+    elev_smooth = cv2.blur(elev, (9, 9))
+    y, x = np.unravel_index(np.argmax(elev_smooth), elev_smooth.shape)
+    peak = elev_smooth[y, x]
+    print(f'[homografia-debug] peak_suavizado={peak:.1f} en ({int(x)},{int(y)}) validos={int(valid.sum())}/{valid.size}', flush=True)
     # Descarta lecturas demasiado bajas (nada ahi) o absurdamente altas
     # (probablemente ruido/paquete corrupto del Kinect, no una mano real).
-    if peak < 15 or peak > 300:
+    if peak < 12 or peak > 250:
         return None
 
     return int(x), int(y)
