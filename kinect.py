@@ -145,22 +145,58 @@ def _find_marker_point():
     # produce un pico aislado de un solo pixel que un promedio local aplasta,
     # mientras que una mano real (un blob de muchos pixeles elevados) sobrevive.
     elev_smooth = cv2.blur(elev, (9, 9))
-    y, x = np.unravel_index(np.argmax(elev_smooth), elev_smooth.shape)
-    peak = elev_smooth[y, x]
-    print(f'[homografia-debug] peak_suavizado={peak:.1f} en ({int(x)},{int(y)}) validos={int(valid.sum())}/{valid.size}', flush=True)
-    # Descarta lecturas demasiado bajas (nada ahi) o absurdamente altas
-    # (probablemente ruido/paquete corrupto del Kinect, no una mano real).
-    if peak < 12 or peak > 250:
+
+    # Enmascara ANTES del argmax: un paquete USB corrupto (el RPi tiene
+    # subvoltaje confirmado) produce regiones de cientos+ unidades que
+    # sobreviven al blur. Si se buscara el maximo global sin enmascarar
+    # primero, esa corrupcion siempre ganaria y una mano real presente en
+    # el mismo frame nunca se consideraria.
+    #
+    # No basta con excluir solo el nucleo corrupto (>250): el blur arrastra
+    # ese pico hacia abajo en un halo de transicion que roza justo debajo del
+    # techo de 250, generando un candidato falso que le gana al pico real de
+    # una mano (~80 unidades). Se dilata la zona excluida para cubrir tambien
+    # ese halo, no solo el pixel/bloque que originalmente excede el rango.
+    corrupt_core = (elev_smooth > 250).astype(np.uint8)
+    if np.any(corrupt_core):
+        corrupt_zone = cv2.dilate(corrupt_core, np.ones((21, 21), np.uint8)) > 0
+    else:
+        corrupt_zone = None
+
+    in_range = (elev_smooth >= 12) & (elev_smooth <= 250)
+    if corrupt_zone is not None:
+        in_range &= ~corrupt_zone
+    if not np.any(in_range):
         return None
+
+    masked = np.where(in_range, elev_smooth, -np.inf)
+    y, x = np.unravel_index(np.argmax(masked), masked.shape)
+    print(f'[homografia-debug] peak_enmascarado={elev_smooth[y, x]:.1f} en ({int(x)},{int(y)})', flush=True)
 
     return int(x), int(y)
 
 
-def _capture_stable_point(samples=6, interval=0.08, max_spread=12):
-    """Muestrea varios frames en una ventana corta y solo acepta el punto si
-    coinciden entre si -- tolera el retraso entre el clic del usuario y el
-    momento real en que el servidor procesa el pedido (WiFi con jitter),
-    y de paso filtra una lectura puntual corrupta por ruido del Kinect."""
+def _cluster_dominant_point(points, radius):
+    """Encuentra el cluster espacial mas grande entre varios puntos muestreados
+    (denso en un radio dado) y devuelve su centro y tamano. Tolera que una
+    fraccion de las muestras sean ruido/corrupcion, siempre que la senal real
+    (la mano quieta) sea la mas consistente en el tiempo."""
+    arr = np.array(points, dtype=np.float32)
+    dist = np.linalg.norm(arr[:, None, :] - arr[None, :, :], axis=2)
+    seed = int(np.argmax((dist <= radius).sum(axis=1)))
+    in_cluster = dist[seed] <= radius
+    if not np.any(in_cluster):
+        return None, 0
+    center = arr[in_cluster].mean(axis=0)
+    return center, int(in_cluster.sum())
+
+
+def _capture_stable_point(samples=20, interval=0.08, cluster_radius=15,
+                           min_cluster_abs=6, min_cluster_frac=0.35):
+    """Muestrea muchos frames en una ventana de ~1.6s y se queda con el
+    cluster espacial dominante -- tolera que la mayoria de las muestras
+    individuales esten corrompidas por perdida de paquetes USB del Kinect,
+    siempre que la mano real sea la posicion mas consistente en el tiempo."""
     points = []
     for _ in range(samples):
         p = _find_marker_point()
@@ -168,13 +204,11 @@ def _capture_stable_point(samples=6, interval=0.08, max_spread=12):
             points.append(p)
         time.sleep(interval)
 
-    if len(points) < max(3, samples // 2):
+    if len(points) < min_cluster_abs:
         return None
 
-    arr = np.array(points, dtype=np.float32)
-    center = arr.mean(axis=0)
-    spread = float(np.max(np.linalg.norm(arr - center, axis=1)))
-    if spread > max_spread:
+    center, size = _cluster_dominant_point(points, cluster_radius)
+    if center is None or size < max(min_cluster_abs, int(round(min_cluster_frac * len(points)))):
         return None
 
     return int(round(center[0])), int(round(center[1]))
