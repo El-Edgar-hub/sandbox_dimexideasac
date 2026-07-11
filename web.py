@@ -139,8 +139,8 @@ HTML = '''<!DOCTYPE html>
   <div class="feedback" id="fb-height"></div>
 </div>
 
-<!-- PASO 3: GEOMETRIA -->
-<div class="step-card" id="step3">
+<!-- PASO 3: GEOMETRIA (oculto por ahora -- codigo intacto por si se retoma) -->
+<div class="step-card" id="step3" style="display:none">
   <div class="step-header">
     <div class="step-num" id="num3">3</div>
     <div class="step-title">Calibrar Geometría</div>
