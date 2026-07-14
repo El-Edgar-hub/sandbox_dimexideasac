@@ -79,9 +79,10 @@ HTML = '''<!DOCTYPE html>
     .btn-save{flex:1;padding:15px;border:none;border-radius:10px;
               background:#d97706;color:#1c1917;font-size:15px;font-weight:700;
               cursor:pointer;transition:opacity .2s}
-    .btn-exhib{flex:1;padding:15px;border:none;border-radius:10px;
+    .btn-exhib{flex:1;padding:15px;border:2px solid transparent;border-radius:10px;
                background:#065f46;color:#6ee7b7;font-size:15px;font-weight:700;
-               cursor:pointer;transition:opacity .2s}
+               cursor:pointer;transition:opacity .2s,border-color .2s}
+    .btn-exhib.active{border-color:#6ee7b7}
     .btn-save:active,.btn-exhib:active{opacity:.7}
   </style>
 </head>
@@ -207,6 +208,8 @@ HTML = '''<!DOCTYPE html>
       pill.textContent = 'CALIBRACIÓN';
       pill.className = 'pill pill-calib';
     }
+    var exhibBtn = document.querySelector('.btn-exhib');
+    if (exhibBtn) exhibBtn.classList.toggle('active', data.mode === 'exhibition');
     if (data.floor_active !== undefined) {
       var fs = document.getElementById('floor-status');
       fs.textContent = data.floor_active ? 'suelo: calibrado' : 'suelo: sin calibrar';
@@ -334,7 +337,12 @@ HTML = '''<!DOCTYPE html>
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify({mode:'exhibition'})
-    }).then(function(r){ return r.json(); }).then(updateConfig);
+    }).then(function(r){ return r.json(); }).then(function(data){
+      updateConfig(data);
+      var btn = document.querySelector('.btn-exhib');
+      btn.textContent = '✓ Exhibición activada';
+      setTimeout(function(){ btn.textContent = '🎬 Exhibición'; }, 2000);
+    });
   }
 
   function toggleMode() {
@@ -343,7 +351,12 @@ HTML = '''<!DOCTYPE html>
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify({mode: next})
-    }).then(function(r){ return r.json(); }).then(updateConfig);
+    }).then(function(r){ return r.json(); }).then(function(data){
+      updateConfig(data);
+      var btn = document.querySelector('.btn-exhib');
+      btn.textContent = next === 'exhibition' ? '✓ Exhibición activada' : '✓ Modo calibración';
+      setTimeout(function(){ btn.textContent = '🎬 Exhibición'; }, 2000);
+    });
   }
 
   // Polling
