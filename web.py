@@ -99,6 +99,7 @@ HTML = '''<!DOCTYPE html>
   <div class="sensor-sub">
     <span><span class="dot" id="dot-conn" style="background:#6b7280"></span> <span id="conn-txt">conectando</span></span>
     <span id="valid-pct">--% válido</span>
+    <span id="floor-status">suelo: sin calibrar</span>
   </div>
 </div>
 
@@ -127,7 +128,8 @@ HTML = '''<!DOCTYPE html>
   </div>
   <p class="step-desc">Pon tu mano a <b>15–20 cm</b> sobre la arena y captura la altura máxima de color.</p>
   <button class="btn-capture btn-height" id="btn-height" onclick="captureHeight()">↑ Capturar Altura Máxima</button>
-  <div class="fine-tune">
+  <!-- fine-tune de depth_min oculto: en modo suelo debe quedar fijo en 0 (ver get_depth) -->
+  <div class="fine-tune" style="display:none">
     <span class="ft-label">depth_min</span>
     <button class="ft-btn" onclick="adjust('min',-5)">−</button>
     <span class="ft-val" id="val-min">---</span>
@@ -178,7 +180,16 @@ HTML = '''<!DOCTYPE html>
     var ok = data.valid_pct > 30;
     document.getElementById('dot-conn').style.background = ok ? '#22c55e' : '#ef4444';
     document.getElementById('conn-txt').textContent = ok ? 'Kinect activo' : 'señal baja';
-    var bg = depthColor(data.center_mean, state.depthMin, state.depthMax);
+    var bg;
+    if (data.floor_center !== undefined && data.floor_center >= 0) {
+      // Modo suelo: el render usa elevacion (floor - profundidad), no profundidad absoluta.
+      // depthColor invierte internamente, asi que se pasa (depthMax - elev) para
+      // reproducir el mismo mapeo que get_depth() sin duplicar la formula.
+      var elev = data.floor_center - data.center_mean;
+      bg = depthColor(state.depthMax - elev, 0, state.depthMax);
+    } else {
+      bg = depthColor(data.center_mean, state.depthMin, state.depthMax);
+    }
     document.getElementById('sensor-card').style.background = bg;
   }
 
@@ -195,6 +206,11 @@ HTML = '''<!DOCTYPE html>
     } else {
       pill.textContent = 'CALIBRACIÓN';
       pill.className = 'pill pill-calib';
+    }
+    if (data.floor_active !== undefined) {
+      var fs = document.getElementById('floor-status');
+      fs.textContent = data.floor_active ? 'suelo: calibrado' : 'suelo: sin calibrar';
+      fs.style.color = data.floor_active ? '#6ee7b7' : '#fbbf24';
     }
     if (data.homography_active !== undefined) refreshGeoUI(data);
   }
@@ -287,14 +303,9 @@ HTML = '''<!DOCTYPE html>
       btn.disabled = false; btn.textContent = '↑ Capturar Altura Máxima';
       if (data.error) { setFeedback('fb-height', '✗ ' + data.error, 'err'); return; }
       updateConfig(data);
-      if (data.depth_min >= data.depth_max) {
-        setFeedback('fb-height', '⚠ depth_min ≥ depth_max — sube más la mano y vuelve a capturar', 'warn');
-      } else {
-        var rng = data.depth_max - data.depth_min;
-        setFeedback('fb-height', '✓ Altura fijada en ' + data.depth_min + '  (rango: ' + rng + ' unidades)', 'ok');
-        document.getElementById('step2').classList.add('done');
-        document.getElementById('num2').textContent = '✓';
-      }
+      setFeedback('fb-height', '✓ Rango de color fijado: 0–' + data.depth_max + ' unidades', 'ok');
+      document.getElementById('step2').classList.add('done');
+      document.getElementById('num2').textContent = '✓';
     }).catch(function(){ btn.disabled=false; btn.textContent='↑ Capturar Altura Máxima'; });
   }
 
@@ -418,12 +429,19 @@ def set_base():
     valid = roi[(roi > 0) & (roi < 2047)]
     if len(valid) < 100:
         return jsonify({'error': 'cobertura insuficiente'}), 503
-    config['depth_max'] = int(np.mean(valid))
+    # Captura el frame completo como referencia de suelo -- asi el marco de
+    # la caja (estatico, siempre mas cerca del Kinect que la arena) nunca
+    # cambia respecto a esta foto y se renderiza oscuro, no solo el centro.
+    if not calibrate_floor():
+        return jsonify({'error': 'sin datos del Kinect'}), 503
+    config['depth_max'] = int(np.mean(valid))  # valor informativo, no se usa para el render
     return jsonify(_payload())
 
 
 @app.route('/set_max_height', methods=['POST'])
 def set_max_height():
+    if floor_frame[0] is None:
+        return jsonify({'error': 'primero completa el Paso 1 (Calibrar Base)'}), 503
     if last_depth_frame[0] is None:
         return jsonify({'error': 'sin datos del Kinect'}), 503
     d = last_depth_frame[0].astype(np.float32)
@@ -433,7 +451,13 @@ def set_max_height():
     valid = roi[(roi > 0) & (roi < 2047)]
     if len(valid) < 100:
         return jsonify({'error': 'cobertura insuficiente'}), 503
-    config['depth_min'] = int(np.mean(valid))
+    froi = floor_frame[0][cy-30:cy+30, cx-40:cx+40]
+    fvalid = froi[(froi > 0) & (froi < 2047)]
+    if len(fvalid) < 100:
+        return jsonify({'error': 'referencia de suelo insuficiente'}), 503
+    elev = float(np.mean(fvalid)) - float(np.mean(valid))
+    config['depth_min'] = 0
+    config['depth_max'] = max(int(elev), 10)
     return jsonify(_payload())
 
 

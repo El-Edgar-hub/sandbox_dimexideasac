@@ -1,3 +1,4 @@
+import os
 import time
 
 import cv2
@@ -6,7 +7,7 @@ import numpy as np
 from config import (
     config, last_depth_frame, floor_frame, live_stretch, auto_calib_status,
     homography_step, homography_points, homography_floor,
-    DISPLAY_WIDTH, DISPLAY_HEIGHT, HOMOGRAPHY_TARGETS,
+    DISPLAY_WIDTH, DISPLAY_HEIGHT, HOMOGRAPHY_TARGETS, FLOOR_FILE,
 )
 from colormap import apply_colormap
 
@@ -115,11 +116,14 @@ def calibrate_floor():
     if last_depth_frame[0] is None:
         return False
     floor_frame[0] = last_depth_frame[0].astype(np.float32)
+    np.save(FLOOR_FILE, floor_frame[0])
     return True
 
 
 def reset_floor():
     floor_frame[0] = None
+    if os.path.exists(FLOOR_FILE):
+        os.remove(FLOOR_FILE)
 
 
 def _find_marker_point():

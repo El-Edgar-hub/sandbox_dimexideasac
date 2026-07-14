@@ -1,9 +1,12 @@
 import os
 import json
 
+import numpy as np
+
 DISPLAY_WIDTH = 1920
 DISPLAY_HEIGHT = 1080
 CONFIG_FILE = os.path.expanduser('~/sandbox_config.json')
+FLOOR_FILE = os.path.expanduser('~/sandbox_floor.npy')
 
 # Esquinas objetivo en espacio de proyector para la calibracion de homografia
 # (con margen para que la mano quepa completa dentro de la caja al calibrar)
@@ -38,6 +41,17 @@ def load_config():
         with open(CONFIG_FILE, 'r') as f:
             saved = json.load(f)
             config.update(saved)
+
+    # El suelo (floor_frame) es un array en memoria, no parte de `config` --
+    # se guarda por separado como .npy para sobrevivir a un reinicio del
+    # proceso sin tener que volver a nivelar y calibrar la arena.
+    if os.path.exists(FLOOR_FILE):
+        try:
+            loaded = np.load(FLOOR_FILE)
+            if loaded.shape == (480, 640):
+                floor_frame[0] = loaded
+        except (OSError, ValueError):
+            pass
 
 
 def save_config():
