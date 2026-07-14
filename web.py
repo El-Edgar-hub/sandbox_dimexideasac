@@ -2,10 +2,7 @@ import numpy as np
 from flask import Flask, render_template_string, request, jsonify
 
 from config import config, auto_calib_status, floor_frame, live_stretch, save_config, last_depth_frame, homography_step
-from kinect import (
-    auto_calibrate, calibrate_floor, reset_floor,
-    start_homography_calibration, capture_homography_point, reset_homography,
-)
+from kinect import auto_calibrate, calibrate_floor, reset_floor
 
 app = Flask(__name__)
 
@@ -488,29 +485,6 @@ def reset_floor_route():
 @app.route('/toggle_stretch', methods=['POST'])
 def toggle_stretch():
     live_stretch[0] = not live_stretch[0]
-    return jsonify(_payload())
-
-
-@app.route('/start_homography', methods=['POST'])
-def start_homography_route():
-    ok = start_homography_calibration()
-    p = _payload()
-    if not ok:
-        p['error'] = 'sin datos del Kinect'
-    return jsonify(p)
-
-
-@app.route('/capture_homography_point', methods=['POST'])
-def capture_homography_point_route():
-    result = capture_homography_point()
-    p = _payload()
-    p.update(result)
-    return jsonify(p)
-
-
-@app.route('/reset_homography', methods=['POST'])
-def reset_homography_route():
-    reset_homography()
     return jsonify(_payload())
 
 
