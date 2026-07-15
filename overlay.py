@@ -42,6 +42,23 @@ def draw_status_overlay(frame):
     return _draw_exhibition_badge(frame) if config['mode'] == 'exhibition' else _draw_calibration_panel(frame)
 
 
+_GEO_GUIDE = (255, 0, 255)  # magenta BGR -- no aparece en el colormap topo, siempre distinguible
+
+
+def draw_geo_guides(frame, corners):
+    """Dibuja las 4 esquinas destino actuales del ajuste manual de keystone
+    (ver calibration.current_geo_corners) para que el usuario vea donde
+    esta cada esquina mientras las mueve con los botones de flecha de la
+    app. Se llama solo en modo calibracion (ver kinect.py)."""
+    pts = [(int(x), int(y)) for x, y in corners]
+    for i in range(4):
+        cv2.line(frame, pts[i], pts[(i + 1) % 4], _GEO_GUIDE, 3)
+    for i, (x, y) in enumerate(pts):
+        cv2.circle(frame, (x, y), 14, _GEO_GUIDE, -1)
+        cv2.putText(frame, str(i + 1), (x + 18, y + 6), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+    return frame
+
+
 def draw_corner_target(frame, step):
     tx, ty = HOMOGRAPHY_TARGETS[step]
     cv2.drawMarker(frame, (tx, ty), (0, 0, 255), cv2.MARKER_CROSS, 60, 4)

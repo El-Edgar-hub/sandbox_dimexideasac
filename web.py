@@ -6,7 +6,10 @@ from config import (
     config, auto_calib_status, floor_frame, live_stretch, save_config,
     last_depth_frame, last_preview_frame, homography_step,
 )
-from calibration import auto_calibrate, calibrate_floor, reset_floor, detect_sand_crop, get_effective_floor
+from calibration import (
+    auto_calibrate, calibrate_floor, reset_floor, detect_sand_crop, get_effective_floor,
+    current_geo_corners, nudge_geo_corner, reset_geo_corners, recompute_geo_homography,
+)
 
 app = Flask(__name__)
 
@@ -67,6 +70,22 @@ HTML = '''<!DOCTYPE html>
     .btn-geo{background:#0891b2;color:#fff}
     .btn-geo-reset{background:#374151;color:#e5e7eb}
     .btn-capture:disabled{opacity:.45;cursor:not-allowed}
+
+    /* GEO KEYSTONE (Paso 3 nuevo) */
+    .geo-step-toggle{display:flex;gap:8px;margin-bottom:14px}
+    .geo-step-btn{flex:1;padding:10px;border-radius:8px;border:1px solid #374151;
+                  background:#111827;color:#9ca3af;font-size:13px;font-weight:700;
+                  cursor:pointer;transition:opacity .15s}
+    .geo-step-btn.active{background:#7c3aed;color:#fff;border-color:#7c3aed}
+    .geo-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+    .geo-corner{background:#111827;border-radius:8px;padding:10px;text-align:center}
+    .geo-corner-label{font-size:11px;color:#6b7280;margin-bottom:8px;line-height:1.3}
+    .geo-pad{display:grid;grid-template-columns:32px 32px 32px;grid-template-rows:32px 32px;
+             gap:4px;justify-content:center}
+    .geo-pad button:nth-child(1){grid-column:2;grid-row:1}
+    .geo-pad button:nth-child(2){grid-column:1;grid-row:2}
+    .geo-pad button:nth-child(3){grid-column:3;grid-row:2}
+    .geo-pad button:nth-child(4){grid-column:2;grid-row:2}
 
     /* FINE TUNE */
     .fine-tune{display:flex;align-items:center;gap:8px;
@@ -185,6 +204,59 @@ HTML = '''<!DOCTYPE html>
   <div class="feedback" id="fb-geo"></div>
 </div>
 
+<!-- PASO 3 (NUEVO): keystone manual por nudge -- NO tocar el bloque id="step3" de arriba (deshabilitado) -->
+<div class="step-card" id="step-geo">
+  <div class="step-header">
+    <div class="step-num" id="num-geo">3</div>
+    <div class="step-title">Alinear Geometría (Keystone)</div>
+  </div>
+  <p class="step-desc">Mira la <b>proyección real sobre la arena</b> (no esta pantalla) y usa las flechas para mover cada esquina hasta que coincida con la esquina física de la caja. Empieza por la que se ve más desalineada.</p>
+  <div class="geo-step-toggle">
+    <button class="geo-step-btn" id="btn-geo-fine" onclick="setGeoStep(5)">Fino</button>
+    <button class="geo-step-btn active" id="btn-geo-coarse" onclick="setGeoStep(20)">Grueso</button>
+  </div>
+  <div class="geo-grid">
+    <div class="geo-corner">
+      <div class="geo-corner-label">Superior<br>Izquierda</div>
+      <div class="geo-pad">
+        <button class="ft-btn" onclick="nudgeCorner(0,0,-1)">↑</button>
+        <button class="ft-btn" onclick="nudgeCorner(0,-1,0)">←</button>
+        <button class="ft-btn" onclick="nudgeCorner(0,1,0)">→</button>
+        <button class="ft-btn" onclick="nudgeCorner(0,0,1)">↓</button>
+      </div>
+    </div>
+    <div class="geo-corner">
+      <div class="geo-corner-label">Superior<br>Derecha</div>
+      <div class="geo-pad">
+        <button class="ft-btn" onclick="nudgeCorner(1,0,-1)">↑</button>
+        <button class="ft-btn" onclick="nudgeCorner(1,-1,0)">←</button>
+        <button class="ft-btn" onclick="nudgeCorner(1,1,0)">→</button>
+        <button class="ft-btn" onclick="nudgeCorner(1,0,1)">↓</button>
+      </div>
+    </div>
+    <div class="geo-corner">
+      <div class="geo-corner-label">Inferior<br>Izquierda</div>
+      <div class="geo-pad">
+        <button class="ft-btn" onclick="nudgeCorner(3,0,-1)">↑</button>
+        <button class="ft-btn" onclick="nudgeCorner(3,-1,0)">←</button>
+        <button class="ft-btn" onclick="nudgeCorner(3,1,0)">→</button>
+        <button class="ft-btn" onclick="nudgeCorner(3,0,1)">↓</button>
+      </div>
+    </div>
+    <div class="geo-corner">
+      <div class="geo-corner-label">Inferior<br>Derecha</div>
+      <div class="geo-pad">
+        <button class="ft-btn" onclick="nudgeCorner(2,0,-1)">↑</button>
+        <button class="ft-btn" onclick="nudgeCorner(2,-1,0)">←</button>
+        <button class="ft-btn" onclick="nudgeCorner(2,1,0)">→</button>
+        <button class="ft-btn" onclick="nudgeCorner(2,0,1)">↓</button>
+      </div>
+    </div>
+  </div>
+  <button class="btn-capture btn-geo-reset" onclick="resetGeometry()">↺ Reiniciar Geometría</button>
+  <div class="feedback" id="fb-geo2"></div>
+</div>
+
 <!-- FOOTER -->
 <div class="footer">
   <button class="btn-save" onclick="save()">💾 Guardar</button>
@@ -269,6 +341,10 @@ HTML = '''<!DOCTYPE html>
       document.getElementById('num2').textContent = data.range_calibrated ? '✓' : '2';
     }
     if (data.homography_active !== undefined) refreshGeoUI(data);
+    if (data.geo_active !== undefined) {
+      document.getElementById('step-geo').classList.toggle('done', data.geo_active);
+      document.getElementById('num-geo').textContent = data.geo_active ? '✓' : '3';
+    }
   }
 
   function startHomography() {
@@ -422,6 +498,29 @@ HTML = '''<!DOCTYPE html>
     setZeroOffset(state.zeroOffset + delta);
   }
 
+  var geoStep = 20;
+  function setGeoStep(px) {
+    geoStep = px;
+    document.getElementById('btn-geo-fine').classList.toggle('active', px === 5);
+    document.getElementById('btn-geo-coarse').classList.toggle('active', px === 20);
+  }
+  function nudgeCorner(corner, dirX, dirY) {
+    fetch('/nudge_corner', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({corner: corner, dx: dirX * geoStep, dy: dirY * geoStep})
+    }).then(function(r){ return r.json(); }).then(function(data){
+      if (data.error) { setFeedback('fb-geo2', '✗ ' + data.error, 'err'); return; }
+      updateConfig(data);
+    });
+  }
+  function resetGeometry() {
+    fetch('/reset_geometry', {method:'POST'}).then(function(r){ return r.json(); }).then(function(data){
+      updateConfig(data);
+      setFeedback('fb-geo2', 'Geometría reiniciada', 'warn');
+    });
+  }
+
   function save() {
     fetch('/save', {method:'POST'}).then(function(r){ return r.json(); }).then(function(d) {
       var btn = document.querySelector('.btn-save');
@@ -499,6 +598,7 @@ def _payload():
         'crop_active':      config.get('crop') is not None,
         'range_calibrated': config.get('range_calibrated', False),
         'zero_offset':      config.get('zero_offset', 0),
+        'geo_active':       config.get('geo_corners') is not None,
     }
 
 
@@ -579,6 +679,7 @@ def set_base():
     # lo que hay mas alla de la caja) para que el render use solo esa area.
     crop, crop_msg, crop_warn = detect_sand_crop(floor_frame[0])
     config['crop'] = crop
+    recompute_geo_homography()  # si ya habia geometria ajustada, la recalcula con el nuevo recorte
     save_config()  # persiste de inmediato -- no depende de presionar "Guardar"
     payload = _payload()
     payload['crop_msg'] = crop_msg
@@ -629,6 +730,23 @@ def set_mode():
 @app.route('/set_zero_offset', methods=['POST'])
 def set_zero_offset():
     config['zero_offset'] = int(request.json['zero_offset'])
+    save_config()
+    return jsonify(_payload())
+
+
+@app.route('/nudge_corner', methods=['POST'])
+def nudge_corner_route():
+    data = request.json
+    ok, err = nudge_geo_corner(int(data.get('corner', -1)), int(data.get('dx', 0)), int(data.get('dy', 0)))
+    if not ok:
+        return jsonify({'error': err}), 400
+    save_config()
+    return jsonify(_payload())
+
+
+@app.route('/reset_geometry', methods=['POST'])
+def reset_geometry_route():
+    reset_geo_corners()
     save_config()
     return jsonify(_payload())
 

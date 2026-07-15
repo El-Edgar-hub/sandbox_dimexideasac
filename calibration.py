@@ -1,11 +1,16 @@
 import os
+import threading
 
 import cv2
 import numpy as np
 
-from config import config, last_depth_frame, floor_frame, auto_calib_status, FLOOR_FILE
+from config import (
+    config, last_depth_frame, floor_frame, auto_calib_status, FLOOR_FILE,
+    DISPLAY_WIDTH, DISPLAY_HEIGHT,
+)
 
 _stretch_tick = [0]
+_geo_lock = threading.Lock()
 
 
 def get_effective_floor():
@@ -169,3 +174,82 @@ def auto_calibrate():
         config['depth_max'] = min(2047, p98 + 5)
         config['range_calibrated'] = True
         auto_calib_status[0] = f'OK: min={config["depth_min"]} max={config["depth_max"]}'
+
+
+def _default_geo_corners():
+    return [[0, 0], [DISPLAY_WIDTH, 0], [DISPLAY_WIDTH, DISPLAY_HEIGHT], [0, DISPLAY_HEIGHT]]
+
+
+def current_geo_corners():
+    """Las 4 esquinas destino actuales (TL,TR,BR,BL) en espacio 1920x1080 --
+    config['geo_corners'] si ya se ajustaron a mano, o el rectangulo de
+    pantalla completa por defecto (equivalente geometrico al cv2.resize de
+    siempre, sin keystone)."""
+    return config.get('geo_corners') or _default_geo_corners()
+
+
+def _crop_dims():
+    crop = config.get('crop')
+    if crop is not None:
+        x0, y0, x1, y1 = crop
+        return x1 - x0, y1 - y0
+    return 640, 480  # resolucion nativa Kinect, sin crop activo
+
+
+def _quad_area(pts):
+    area = 0.0
+    for i in range(4):
+        x1, y1 = pts[i]
+        x2, y2 = pts[(i + 1) % 4]
+        area += x1 * y2 - x2 * y1
+    return abs(area) / 2.0
+
+
+def _apply_geo_corners(corners):
+    """Recalcula config['homography'] a partir de las 4 esquinas destino
+    dadas y las dimensiones ACTUALES de crop. Nunca deja config['homography']
+    en un estado invalido: si el calculo falla o el area queda demasiado
+    chica, no toca nada y devuelve el error."""
+    min_area = 0.15 * DISPLAY_WIDTH * DISPLAY_HEIGHT  # mismo umbral que detect_sand_crop
+    if _quad_area(corners) < min_area:
+        return False, 'las esquinas quedaron demasiado juntas, deshaz el ultimo ajuste'
+    w, h = _crop_dims()
+    src = np.array([[0, 0], [w, 0], [w, h], [0, h]], dtype=np.float32)
+    dst = np.array(corners, dtype=np.float32)
+    try:
+        h_matrix = cv2.getPerspectiveTransform(src, dst)
+    except cv2.error:
+        return False, 'no se pudo calcular la geometria con esas esquinas'
+    config['geo_corners'] = corners
+    config['homography'] = h_matrix.tolist()
+    return True, None
+
+
+def nudge_geo_corner(corner, dx, dy):
+    if corner not in (0, 1, 2, 3):
+        return False, 'esquina invalida'
+    with _geo_lock:
+        corners = [list(p) for p in current_geo_corners()]  # copia -- nunca mutar el objeto ya guardado
+        x, y = corners[corner]
+        corners[corner] = [
+            max(0, min(DISPLAY_WIDTH, x + dx)),
+            max(0, min(DISPLAY_HEIGHT, y + dy)),
+        ]
+        return _apply_geo_corners(corners)
+
+
+def reset_geo_corners():
+    with _geo_lock:
+        config['geo_corners'] = None
+        config['homography'] = None
+
+
+def recompute_geo_homography():
+    """Llamar despues de cualquier cambio a config['crop'] (p.ej. una nueva
+    Captura de Base) -- si ya habia geometria ajustada a mano, la recalcula
+    contra las nuevas dimensiones de crop en vez de dejarla desalineada."""
+    with _geo_lock:
+        corners = config.get('geo_corners')
+        if corners is None:
+            return
+        _apply_geo_corners(corners)

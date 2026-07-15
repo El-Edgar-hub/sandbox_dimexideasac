@@ -27,6 +27,8 @@ config = {
     'range_calibrated': False,   # True solo cuando auto_calibrate() midio un rango real
     'zero_offset': 0,      # unidades crudas restadas a floor_frame antes de medir elevacion
                             # (positivo = sube el nivel cero, ver calibration.get_effective_floor)
+    'geo_corners': None,    # [[x,y]x4] TL,TR,BR,BL en espacio 1920x1080, o None
+                            # (None == pantalla completa, ver calibration.current_geo_corners)
 }
 
 last_depth_frame = [None]

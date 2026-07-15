@@ -6,8 +6,8 @@ from config import (
     homography_step, DISPLAY_WIDTH, DISPLAY_HEIGHT,
 )
 from colormap import apply_colormap
-from calibration import _update_live_stretch, get_effective_floor
-from overlay import draw_status_overlay, draw_corner_target
+from calibration import _update_live_stretch, get_effective_floor, current_geo_corners
+from overlay import draw_status_overlay, draw_corner_target, draw_geo_guides
 
 
 def get_depth(dev, data, timestamp):
@@ -65,6 +65,9 @@ def get_depth(dev, data, timestamp):
         display = draw_corner_target(display, homography_step[0])
     else:
         display = draw_status_overlay(display)
+
+    if config['mode'] == 'calibration':
+        display = draw_geo_guides(display, current_geo_corners())
 
     cv2.imshow('Sandbox', display)
     cv2.waitKey(1)
