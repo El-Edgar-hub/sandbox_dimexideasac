@@ -6,6 +6,7 @@ Wants=graphical.target
 [Service]
 Type=simple
 User=root
+Environment=HOME=/home/fran
 Environment=DISPLAY=:0
 Environment=XAUTHORITY=/home/fran/.Xauthority
 Environment=PYTHONPATH=/home/fran/libfreenect/wrappers/python
