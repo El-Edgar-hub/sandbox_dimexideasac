@@ -23,7 +23,9 @@ def _update_live_stretch(depth):
 
     if floor_frame[0] is not None:
         elev = np.clip(floor_frame[0] - depth, 0, None)
-        valid = elev[elev > 8]
+        # Excluye picos de corrupcion USB (1000+ unidades) del calculo,
+        # mismo problema y arreglo que en auto_calibrate().
+        valid = elev[(elev > 8) & (elev < 300)]
         if len(valid) < 500:
             return
         new_max = max(int(np.percentile(valid, 97)), 20)
@@ -357,7 +359,13 @@ def auto_calibrate():
 
     if floor_frame[0] is not None:
         elev = np.clip(floor_frame[0] - depth, 0, None)
-        valid_elev = elev[elev > 8]
+        # Suaviza para diluir picos aislados de corrupcion USB del Kinect
+        # (confirmados en esta RPi, ver commit d6ec428) y excluye lo que
+        # quede por encima de un techo sano -- sin esto, unos pocos pixeles
+        # con elevacion falsa de 1000+ jalan el percentil 95 muy por encima
+        # de cualquier monticulo real (~150 unidades como mucho).
+        elev_smooth = cv2.blur(elev, (9, 9))
+        valid_elev = elev_smooth[(elev_smooth > 8) & (elev_smooth < 300)]
         if len(valid_elev) == 0:
             config['depth_min'] = 0
             config['depth_max'] = 100

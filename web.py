@@ -62,6 +62,9 @@ HTML = '''<!DOCTYPE html>
                background:#111827;border-radius:8px;padding:10px 14px}
     .ft-label{font-size:12px;color:#6b7280;flex:1}
     .ft-val{font-size:16px;font-weight:700;color:#e5e7eb;min-width:48px;text-align:center}
+    .ft-input{font-size:16px;font-weight:700;color:#e5e7eb;min-width:64px;text-align:center;
+               background:#0d1117;border:1px solid #374151;border-radius:6px;padding:5px 2px}
+    .ft-input:focus{outline:none;border-color:#7c3aed}
     .ft-btn{width:32px;height:32px;border-radius:8px;border:1px solid #374151;
             background:#1f2937;color:#e5e7eb;font-size:18px;cursor:pointer;
             display:flex;align-items:center;justify-content:center;line-height:1}
@@ -134,7 +137,7 @@ HTML = '''<!DOCTYPE html>
   <div class="fine-tune">
     <span class="ft-label">depth_max</span>
     <button class="ft-btn" onclick="adjust('max',-5)">−</button>
-    <span class="ft-val" id="val-max2">---</span>
+    <input class="ft-input" id="val-max2" type="number" onchange="setDepthMax(this.value)">
     <button class="ft-btn" onclick="adjust('max',+5)">+</button>
   </div>
   <!-- fine-tune de depth_min oculto: en modo suelo debe quedar fijo en 0 (ver get_depth) -->
@@ -207,7 +210,7 @@ HTML = '''<!DOCTYPE html>
     state.depthMax = data.depth_max;
     state.mode = data.mode;
     document.getElementById('val-max').textContent = data.depth_max;
-    document.getElementById('val-max2').textContent = data.depth_max;
+    document.getElementById('val-max2').value = data.depth_max;
     document.getElementById('val-min').textContent = data.depth_min;
     var pill = document.getElementById('mode-pill');
     if (data.mode === 'exhibition') {
@@ -350,6 +353,15 @@ HTML = '''<!DOCTYPE html>
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify({depth_min: dmin, depth_max: dmax})
+    }).then(function(r){ return r.json(); }).then(updateConfig);
+  }
+
+  function setDepthMax(val) {
+    var dmax = Math.max(1, Math.min(2047, parseInt(val, 10) || state.depthMax));
+    fetch('/update', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({depth_min: state.depthMin, depth_max: dmax})
     }).then(function(r){ return r.json(); }).then(updateConfig);
   }
 
