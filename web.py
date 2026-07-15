@@ -112,7 +112,9 @@ HTML = '''<!DOCTYPE html>
   </div>
   <p class="step-desc">Deja la arena <b>completamente plana y vacía</b>, luego captura el nivel base.</p>
   <button class="btn-capture btn-base" id="btn-base" onclick="captureBase()">📷 Capturar Base Plana</button>
-  <div class="fine-tune">
+  <!-- fine-tune de depth_max oculto aqui: este valor es solo informativo en
+       modo suelo, el que de verdad importa para el render es el del Paso 2 -->
+  <div class="fine-tune" style="display:none">
     <span class="ft-label">depth_max</span>
     <button class="ft-btn" onclick="adjust('max',-5)">−</button>
     <span class="ft-val" id="val-max">---</span>
@@ -121,14 +123,20 @@ HTML = '''<!DOCTYPE html>
   <div class="feedback" id="fb-base"></div>
 </div>
 
-<!-- PASO 2: ALTURA -->
+<!-- PASO 2: RANGO DE COLOR -->
 <div class="step-card" id="step2">
   <div class="step-header">
     <div class="step-num" id="num2">2</div>
-    <div class="step-title">Calibrar Altura Máxima</div>
+    <div class="step-title">Calibrar Rango de Color</div>
   </div>
-  <p class="step-desc">Pon tu mano a <b>15–20 cm</b> sobre la arena y captura la altura máxima de color.</p>
-  <button class="btn-capture btn-height" id="btn-height" onclick="captureHeight()">↑ Capturar Altura Máxima</button>
+  <p class="step-desc">Construye montículos/valles en la arena, luego presiona Auto Calibrar Rango — se ajusta automáticamente al relieve real.</p>
+  <button class="btn-capture btn-height" id="btn-height" onclick="autoCalibrateRange()">📊 Auto Calibrar Rango</button>
+  <div class="fine-tune">
+    <span class="ft-label">depth_max</span>
+    <button class="ft-btn" onclick="adjust('max',-5)">−</button>
+    <span class="ft-val" id="val-max2">---</span>
+    <button class="ft-btn" onclick="adjust('max',+5)">+</button>
+  </div>
   <!-- fine-tune de depth_min oculto: en modo suelo debe quedar fijo en 0 (ver get_depth) -->
   <div class="fine-tune" style="display:none">
     <span class="ft-label">depth_min</span>
@@ -199,6 +207,7 @@ HTML = '''<!DOCTYPE html>
     state.depthMax = data.depth_max;
     state.mode = data.mode;
     document.getElementById('val-max').textContent = data.depth_max;
+    document.getElementById('val-max2').textContent = data.depth_max;
     document.getElementById('val-min').textContent = data.depth_min;
     var pill = document.getElementById('mode-pill');
     if (data.mode === 'exhibition') {
@@ -299,6 +308,8 @@ HTML = '''<!DOCTYPE html>
     }).catch(function(){ btn.disabled=false; btn.textContent='📷 Capturar Base Plana'; });
   }
 
+  // Ya no se usa desde ningun boton -- se deja intacta por si se retoma el
+  // gesto manual de mano en el futuro (mismo patron de "ocultar, no borrar").
   function captureHeight() {
     var btn = document.getElementById('btn-height');
     btn.disabled = true; btn.textContent = '⏳ Capturando...';
@@ -310,6 +321,21 @@ HTML = '''<!DOCTYPE html>
       document.getElementById('step2').classList.add('done');
       document.getElementById('num2').textContent = '✓';
     }).catch(function(){ btn.disabled=false; btn.textContent='↑ Capturar Altura Máxima'; });
+  }
+
+  function autoCalibrateRange() {
+    var btn = document.getElementById('btn-height');
+    btn.disabled = true; btn.textContent = '⏳ Calibrando...';
+    fetch('/auto_calibrate', {method:'POST'}).then(function(r){ return r.json(); }).then(function(data) {
+      btn.disabled = false; btn.textContent = '📊 Auto Calibrar Rango';
+      updateConfig(data);
+      var isError = (data.status || '').indexOf('Error') === 0;
+      setFeedback('fb-height', (isError ? '✗ ' : '✓ ') + data.status, isError ? 'err' : 'ok');
+      if (!isError) {
+        document.getElementById('step2').classList.add('done');
+        document.getElementById('num2').textContent = '✓';
+      }
+    }).catch(function(){ btn.disabled=false; btn.textContent='📊 Auto Calibrar Rango'; });
   }
 
   function adjust(which, delta) {
@@ -494,13 +520,16 @@ def save():
     return jsonify({'msg': 'Configuracion guardada'})
 
 
-# Endpoints legacy (no expuestos en UI, conservados por si acaso)
+# Usada por el Paso 2 del asistente ("Auto Calibrar Rango")
 @app.route('/auto_calibrate', methods=['POST'])
 def auto_calibrate_route():
     auto_calibrate()
     p = _payload()
     p['status'] = auto_calib_status[0]
     return jsonify(p)
+
+
+# Endpoints legacy (no expuestos en UI, conservados por si acaso)
 
 
 @app.route('/calibrate_floor', methods=['POST'])

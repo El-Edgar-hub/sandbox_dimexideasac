@@ -296,6 +296,9 @@ def auto_calibrate():
     if last_depth_frame[0] is None:
         auto_calib_status[0] = 'Error: sin datos'
         return
+    if floor_frame[0] is None:
+        auto_calib_status[0] = 'Error: primero completa el Paso 1 (Calibrar Base)'
+        return
     depth = last_depth_frame[0].astype(np.float32)
 
     if floor_frame[0] is not None:
