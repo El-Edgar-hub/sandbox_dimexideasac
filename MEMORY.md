@@ -1,6 +1,6 @@
 # MEMORY.md — AR Sandbox (sandbox_dimexideasac)
 
-Ultima actualizacion: 2026-07-15 (commit `be4a83d`, branch `v2`).
+Ultima actualizacion: 2026-07-15 (commit `b9d48c4`, branch `v2`).
 
 Este archivo es el que hay que leer primero para entender el estado actual
 del codigo y como se llego hasta aqui. `DEVELOPMENT.md` (fuera del repo,
@@ -30,12 +30,21 @@ Construido y en uso hoy:
   `systemd/sandbox.service`).
 - Vista previa en vivo del mapa de colores de la arena dentro de la app de
   calibracion (`/preview.jpg`), en vez de solo un numero y un color plano.
+- Alineacion manual de geometria (keystone) por ajuste de 4 esquinas con
+  botones de flecha, mirando la proyeccion real — Paso 3 de la app,
+  `config['geo_corners']` + `/nudge_corner` + `/reset_geometry`. Es una
+  **alternativa independiente** a la homografia por deteccion de mano de
+  abajo, no la reemplaza ni la revive: reutiliza el mismo mecanismo de
+  aplicacion (`config['homography']` + `cv2.warpPerspective`), pero la
+  matriz se calcula desde 4 puntos que el usuario ajusta a ojo, sin que el
+  Kinect tenga que detectar nada — inmune al ruido USB.
 
 Construido pero **deshabilitado**: calibracion geometrica por homografia
 (4 esquinas con la mano). El codigo se conserva intacto en `homography.py`
 pero **no se importa desde `web.py`** — no hay rutas activas para
 usarlo. Deshabilitado desde el commit `a845686` por ruido USB confirmado
-en esta RPi especifica (ver "Decisiones clave").
+en esta RPi especifica (ver "Decisiones clave"). El ajuste manual de
+geometria (punto anterior) es la via que se usa hoy en su lugar.
 
 ## Mapa de archivos
 
@@ -59,7 +68,9 @@ en esta RPi especifica (ver "Decisiones clave").
   referencia), `get_effective_floor()` (suelo + `zero_offset`),
   `_update_live_stretch()` (ajuste continuo opcional, no usado por
   defecto), `detect_sand_crop()` (recorte automatico del area de arena),
-  `auto_calibrate()` (mide el relieve real y fija el rango de color).
+  `auto_calibrate()` (mide el relieve real y fija el rango de color),
+  `current_geo_corners()`/`nudge_geo_corner()`/`reset_geo_corners()`/
+  `recompute_geo_homography()` (ajuste manual de keystone, ver abajo).
 - **`homography.py`** — calibracion de 4 esquinas por deteccion de mano,
   **deshabilitada** (ver arriba). Conservada intacta por si se retoma con
   mejor hardware o otra tecnica de deteccion.
@@ -86,6 +97,8 @@ config = {
     'crop': None,                # [x0,y0,x1,y1] en espacio Kinect 640x480
     'range_calibrated': False,   # True solo si auto_calibrate() midio un rango real
     'zero_offset': 0,            # unidades crudas restadas a floor_frame (ver abajo)
+    'geo_corners': None,          # [[x,y]x4] TL,TR,BR,BL en 1920x1080, o None
+                                  # (None == pantalla completa, ver Paso 3 / keystone manual)
 }
 ```
 
@@ -160,6 +173,8 @@ LUT de 256 valores, BGR, bipolar con el verde fijo en el indice 128:
 | `/update` | POST | Ajuste manual de `depth_min`/`depth_max` + auto-guarda |
 | `/mode` | POST | Cambia `calibration`/`exhibition` + auto-guarda |
 | `/set_zero_offset` | POST | Mueve el nivel cero (`zero_offset`) + auto-guarda |
+| `/nudge_corner` | POST | Paso 3: mueve una esquina de geometria (keystone) + auto-guarda |
+| `/reset_geometry` | POST | Quita el ajuste manual de geometria (vuelve a pantalla completa) + auto-guarda |
 | `/save` | POST | Guarda `config` a disco explicitamente (boton "Guardar", ya no estrictamente necesario) |
 | `/auto_calibrate` | POST | Paso 2: mide relieve real y fija el rango de color + auto-guarda si queda calibrado |
 | `/calibrate_floor` | POST | Legacy, no expuesto en la UI |
@@ -216,6 +231,15 @@ No hay rutas de homografia activas — se quitaron todas en el commit
     `/preview.jpg` sirve el mismo frame coloreado/recortado que se
     proyecta, sin costo extra por frame (se codifica a JPEG solo cuando
     se pide, no en cada callback del Kinect).
+15. **Alineacion manual de geometria (keystone)** (`b9d48c4`) — la
+    proyeccion tenia una distorsion trapezoidal real (confirmada por el
+    usuario). En vez de revivir la homografia por deteccion de mano
+    (ya descartada por no confiable), se agrego un ajuste manual de las 4
+    esquinas destino con botones de flecha, mirando la proyeccion real —
+    inmune al ruido USB porque no depende de datos de profundidad para
+    calibrar. Por defecto (`geo_corners=None`) es geometricamente idéntico
+    al `cv2.resize` de siempre, asi que no cambia nada hasta que se ajusta
+    una esquina.
 
 ## Decisiones clave
 
@@ -249,6 +273,27 @@ No hay rutas de homografia activas — se quitaron todas en el commit
   responsabilidades entrelazadas fuera de orden (render, overlays,
   calibracion, homografia deshabilitada). Separado para poder tocar cada
   parte sin leer todo el archivo.
+- **Por que la geometria se ajusta a mano (nudge) y no con un homografia
+  detectada**: la deteccion de mano ya se probo y se descarto (ver arriba)
+  por el ruido USB de esta RPi. El ajuste manual logra lo mismo
+  (corregir keystone) sin depender en absoluto de los datos de
+  profundidad — el usuario ve la proyeccion real y ajusta a ojo, algo que
+  ninguna cantidad de suavizado de señal puede reemplazar cuando el
+  problema de fondo es hardware.
+- **Cuidado al probar rutas que auto-guardan contra el `~/sandbox_config.json`
+  real**: no solo `FLOOR_FILE` es una ruta real compartida entre "test" y
+  produccion (ver incidente anterior en el historial de este proyecto) —
+  `CONFIG_FILE` tambien lo es. Un script de prueba que llama una ruta de
+  `web.py` que termina en `save_config()` (p.ej. `/nudge_corner`,
+  `/reset_geometry`, `/set_zero_offset`, etc.) escribe al archivo real sin
+  importar de que copia del modulo se haya importado `config.py`, porque
+  `CONFIG_FILE = os.path.expanduser('~/sandbox_config.json')` siempre
+  resuelve a la misma ruta. Esto causo la perdida temporal de una
+  calibracion real durante el desarrollo de la geometria manual (restaurada
+  desde capturas de pantalla). Cualquier prueba sintetica que ejercite una
+  ruta con auto-guardado debe respaldar `~/sandbox_config.json` antes (igual
+  que ya se hacia con `sandbox_floor.npy`), o evitar llamar esas rutas
+  directamente.
 - **Por que `HOME=/home/fran` explicito en el servicio systemd**:
   `config.py` usa `os.path.expanduser('~')` para ubicar
   `sandbox_config.json`/`sandbox_floor.npy`. systemd con `User=root` fija
@@ -259,9 +304,10 @@ No hay rutas de homografia activas — se quitaron todas en el commit
 
 ## Pendientes
 
-- Calibracion geometrica (homografia) sigue deshabilitada — retomar
-  requeriria hardware mas estable (fuente de alimentacion sin
-  subvoltaje) o una tecnica de deteccion de mano distinta.
+- Calibracion geometrica por deteccion de mano sigue deshabilitada —
+  retomarla requeriria hardware mas estable (fuente de alimentacion sin
+  subvoltaje) o una tecnica de deteccion distinta. El ajuste manual de
+  keystone (Paso 3) es la via que se usa en su lugar.
 - El usuario ajusta el techo/valle manualmente cuando quiere ver mas
   rojo/blanco/azul profundo; no hay plan de reducir el margen +20 de
   `auto_calibrate()`.
