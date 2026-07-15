@@ -2,8 +2,8 @@ import cv2
 import numpy as np
 
 from config import (
-    config, last_depth_frame, floor_frame, live_stretch, homography_step,
-    DISPLAY_WIDTH, DISPLAY_HEIGHT,
+    config, last_depth_frame, last_preview_frame, floor_frame, live_stretch,
+    homography_step, DISPLAY_WIDTH, DISPLAY_HEIGHT,
 )
 from colormap import apply_colormap
 from calibration import _update_live_stretch, get_effective_floor
@@ -47,6 +47,12 @@ def get_depth(dev, data, timestamp):
     if crop is not None:
         x0, y0, x1, y1 = crop
         color = color[y0:y1, x0:x1]
+
+    # Mismo frame que se proyecta (ya coloreado y recortado), para que la
+    # vista previa en la app web de calibracion coincida con lo que se ve
+    # en la arena -- se codifica a JPEG solo cuando alguien lo pide (ver
+    # web.py /preview.jpg), no en cada frame del Kinect.
+    last_preview_frame[0] = color
 
     homography = config.get('homography')
     if homography is not None:

@@ -30,6 +30,7 @@ config = {
 }
 
 last_depth_frame = [None]
+last_preview_frame = [None]  # ultimo frame ya coloreado/recortado, para /preview.jpg
 floor_frame = [None]
 live_stretch = [False]
 auto_calib_status = ['Listo']

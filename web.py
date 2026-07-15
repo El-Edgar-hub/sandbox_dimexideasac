@@ -1,7 +1,11 @@
+import cv2
 import numpy as np
-from flask import Flask, render_template_string, request, jsonify
+from flask import Flask, render_template_string, request, jsonify, Response
 
-from config import config, auto_calib_status, floor_frame, live_stretch, save_config, last_depth_frame, homography_step
+from config import (
+    config, auto_calib_status, floor_frame, live_stretch, save_config,
+    last_depth_frame, last_preview_frame, homography_step,
+)
 from calibration import auto_calibrate, calibrate_floor, reset_floor, detect_sand_crop, get_effective_floor
 
 app = Flask(__name__)
@@ -25,6 +29,13 @@ HTML = '''<!DOCTYPE html>
           letter-spacing:.5px;cursor:pointer;border:none;transition:background .3s}
     .pill-calib{background:#1d4ed8;color:#fff}
     .pill-exhib{background:#065f46;color:#6ee7b7}
+
+    /* VISTA PREVIA */
+    .preview-card{background:#000;border-radius:12px;overflow:hidden;margin-bottom:14px;
+                  text-align:center;position:relative;min-height:140px;
+                  display:flex;align-items:center;justify-content:center}
+    .preview-card img{width:100%;max-height:260px;object-fit:contain;display:none}
+    .preview-empty{color:#6b7280;font-size:12px}
 
     /* SENSOR CARD */
     .sensor-card{border-radius:12px;padding:20px;margin-bottom:14px;
@@ -95,6 +106,12 @@ HTML = '''<!DOCTYPE html>
   <h1>🏔 AR Sandbox</h1>
   <button class="pill pill-calib" id="mode-pill" onclick="toggleMode()">CALIBRACIÓN</button>
 </header>
+
+<!-- VISTA PREVIA EN VIVO (mismo mapa de colores que se proyecta en la arena) -->
+<div class="preview-card" id="preview-card">
+  <img id="preview-img" alt="vista previa de la arena" onload="onPreviewLoad()" onerror="onPreviewError()">
+  <div class="preview-empty" id="preview-empty">esperando datos del Kinect…</div>
+</div>
 
 <!-- SENSOR EN VIVO -->
 <div class="sensor-card" id="sensor-card" style="background:#1e3a5f">
@@ -440,6 +457,18 @@ HTML = '''<!DOCTYPE html>
     });
   }
 
+  function onPreviewLoad() {
+    document.getElementById('preview-img').style.display = 'block';
+    document.getElementById('preview-empty').style.display = 'none';
+  }
+  function onPreviewError() {
+    document.getElementById('preview-img').style.display = 'none';
+    document.getElementById('preview-empty').style.display = 'block';
+  }
+  function pollPreview() {
+    document.getElementById('preview-img').src = '/preview.jpg?t=' + Date.now();
+  }
+
   // Polling
   function pollSensor() {
     fetch('/depth_stats').then(function(r){ return r.json(); }).then(updateSensor).catch(function(){});
@@ -448,9 +477,10 @@ HTML = '''<!DOCTYPE html>
     fetch('/status').then(function(r){ return r.json(); }).then(updateConfig).catch(function(){});
   }
 
-  pollSensor(); pollStatus();
+  pollSensor(); pollStatus(); pollPreview();
   setInterval(pollSensor, 1000);
   setInterval(pollStatus, 3000);
+  setInterval(pollPreview, 700);
 </script>
 </body>
 </html>
@@ -514,6 +544,17 @@ def depth_stats():
         'floor_center': int(eff_floor[cy-20:cy+20, cx-20:cx+20].mean())
                         if eff_floor is not None else -1,
     })
+
+
+@app.route('/preview.jpg')
+def preview():
+    frame = last_preview_frame[0]
+    if frame is None:
+        return '', 503
+    ok, buf = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+    if not ok:
+        return '', 500
+    return Response(buf.tobytes(), mimetype='image/jpeg')
 
 
 @app.route('/set_base', methods=['POST'])
