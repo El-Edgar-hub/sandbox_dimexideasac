@@ -22,15 +22,19 @@ def _update_live_stretch(depth):
     alpha = 0.15
 
     if floor_frame[0] is not None:
-        elev = np.clip(floor_frame[0] - depth, 0, None)
+        elev = floor_frame[0] - depth  # con signo -- monticulos y valles
         # Excluye picos de corrupcion USB (1000+ unidades) del calculo,
         # mismo problema y arreglo que en auto_calibrate().
-        valid = elev[(elev > 8) & (elev < 300)]
-        if len(valid) < 500:
+        pos_valid = elev[(elev > 8) & (elev < 300)]
+        neg_valid = elev[(elev < -8) & (elev > -300)]
+        if len(pos_valid) + len(neg_valid) < 500:
             return
-        new_max = max(int(np.percentile(valid, 97)), 20)
-        config['depth_max'] = int(alpha * new_max + (1 - alpha) * config['depth_max'])
-        config['depth_min'] = 0
+        if len(pos_valid) > 0:
+            new_max = max(int(np.percentile(pos_valid, 97)), 20)
+            config['depth_max'] = int(alpha * new_max + (1 - alpha) * config['depth_max'])
+        if len(neg_valid) > 0:
+            new_valley = max(int(np.percentile(-neg_valid, 97)), 20)
+            config['depth_min'] = int(alpha * new_valley + (1 - alpha) * config['depth_min'])
     else:
         valid = depth[(depth > 0) & (depth < 2047)]
         if len(valid) < 500:
@@ -57,7 +61,7 @@ def _draw_calibration_panel(frame):
     range_ok = config.get('range_calibrated', False)
     p1 = 'Paso 1: Suelo OK' if floor_ok else 'Paso 1: Suelo pendiente'
     cv2.putText(frame, p1, (20, 85), cv2.FONT_HERSHEY_SIMPLEX, 0.6, _DONE if floor_ok else _PENDING, 2)
-    p2 = f'Paso 2: Rango OK (0-{config["depth_max"]}u)' if range_ok else 'Paso 2: Rango pendiente'
+    p2 = f'Paso 2: Rango OK (-{config["depth_min"]} a +{config["depth_max"]}u)' if range_ok else 'Paso 2: Rango pendiente'
     cv2.putText(frame, p2, (20, 115), cv2.FONT_HERSHEY_SIMPLEX, 0.6, _DONE if range_ok else _PENDING, 2)
     cv2.putText(frame, f'depth_min:{config["depth_min"]}  depth_max:{config["depth_max"]}',
                 (20, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (140, 140, 140), 1)
@@ -103,9 +107,16 @@ def get_depth(dev, data, timestamp):
         _update_live_stretch(depth)
 
     if floor_frame[0] is not None:
-        elev = np.clip(floor_frame[0] - depth, 0, None)
-        height_range = max(1, config['depth_max'] - config['depth_min'])
-        depth_norm = np.clip(elev / height_range, 0.0, 1.0)
+        # Elevacion CON SIGNO respecto al suelo fijado: positiva = monticulo,
+        # negativa = valle/hueco (ya no se recorta en 0 -- antes un valle se
+        # via identico a la arena plana, ambos clipeados a elevacion 0).
+        elev = floor_frame[0] - depth
+        depth_max_safe = max(1, config['depth_max'])  # techo: monticulo mas alto
+        depth_min_safe = max(1, config['depth_min'])  # ahora es la profundidad de valle mas honda
+        pos_norm = np.clip(elev / depth_max_safe, 0.0, 1.0)
+        neg_norm = np.clip(-elev / depth_min_safe, 0.0, 1.0)
+        # 0.5 = elevacion cero (verde, el suelo fijado) -- ver colormap.py
+        depth_norm = np.where(elev >= 0, 0.5 + 0.5 * pos_norm, 0.5 - 0.5 * neg_norm)
     else:
         rng = max(1, config['depth_max'] - config['depth_min'])
         # depth_max = base (valor alto, lejos del Kinect)
@@ -383,24 +394,36 @@ def auto_calibrate():
     depth = last_depth_frame[0].astype(np.float32)
 
     if floor_frame[0] is not None:
-        elev = np.clip(floor_frame[0] - depth, 0, None)
+        # Elevacion CON SIGNO (monticulos positivos, valles negativos) --
+        # se analizan ambos lados por separado para calibrar el techo
+        # (depth_max) y la profundidad de valle (depth_min) de forma
+        # independiente, segun el relieve real construido.
+        elev = floor_frame[0] - depth
         # Suaviza para diluir picos aislados de corrupcion USB del Kinect
         # (confirmados en esta RPi, ver commit d6ec428) y excluye lo que
-        # quede por encima de un techo sano -- sin esto, unos pocos pixeles
-        # con elevacion falsa de 1000+ jalan el percentil 95 muy por encima
-        # de cualquier monticulo real (~150 unidades como mucho).
+        # quede por encima/debajo de un techo sano -- sin esto, unos pocos
+        # pixeles con elevacion falsa de 1000+ jalan el percentil muy por
+        # encima de cualquier monticulo o valle real (~150 unidades como
+        # mucho).
         elev_smooth = cv2.blur(elev, (9, 9))
-        valid_elev = elev_smooth[(elev_smooth > 8) & (elev_smooth < 300)]
-        if len(valid_elev) == 0:
-            config['depth_min'] = 0
+        pos_elev = elev_smooth[(elev_smooth > 8) & (elev_smooth < 300)]
+        neg_elev = elev_smooth[(elev_smooth < -8) & (elev_smooth > -300)]
+
+        if len(pos_elev) == 0 and len(neg_elev) == 0:
             config['depth_max'] = 100
-            auto_calib_status[0] = 'Sin elevacion detectada, rango por defecto'
+            config['depth_min'] = 30
+            auto_calib_status[0] = 'Sin relieve detectado, rango por defecto'
             return
-        max_elev = int(np.percentile(valid_elev, 95))
-        config['depth_min'] = 0
-        config['depth_max'] = max(max_elev + 20, 30)
+
+        if len(pos_elev) > 0:
+            max_elev = int(np.percentile(pos_elev, 95))
+            config['depth_max'] = max(max_elev + 20, 30)
+        if len(neg_elev) > 0:
+            max_valley = int(np.percentile(-neg_elev, 95))
+            config['depth_min'] = max(max_valley + 20, 30)
+
         config['range_calibrated'] = True
-        auto_calib_status[0] = f'OK: elevacion 0-{config["depth_max"]} unidades'
+        auto_calib_status[0] = f'OK: relieve -{config["depth_min"]} a +{config["depth_max"]} unidades'
     else:
         valid = depth[(depth > 0) & (depth < 2047)]
         if len(valid) == 0:

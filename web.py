@@ -132,16 +132,16 @@ HTML = '''<!DOCTYPE html>
     <div class="step-num" id="num2">2</div>
     <div class="step-title">Calibrar Rango de Color</div>
   </div>
-  <p class="step-desc">Construye montículos/valles en la arena, luego presiona Auto Calibrar Rango — se ajusta automáticamente al relieve real. También puedes ajustar la base y el techo manualmente, a tu gusto.</p>
+  <p class="step-desc">Construye montículos/valles en la arena, luego presiona Auto Calibrar Rango — mide el relieve real (arriba y abajo del suelo fijado) y ajusta el color automáticamente. La elevación cero (el suelo) se ve <b>verde</b>; montículos van hacia amarillo/naranja/rojo/blanco; valles van hacia tonos de <b>azul</b>. También puedes ajustar el techo y la profundidad de valle manualmente, a tu gusto.</p>
   <button class="btn-capture btn-height" id="btn-height" onclick="autoCalibrateRange()">📊 Auto Calibrar Rango</button>
   <div class="fine-tune">
-    <span class="ft-label">techo (depth_max)</span>
+    <span class="ft-label">techo monticulo (depth_max)</span>
     <button class="ft-btn" onclick="adjust('max',-5)">−</button>
     <input class="ft-input" id="val-max2" type="number" onchange="setDepthMax(this.value)">
     <button class="ft-btn" onclick="adjust('max',+5)">+</button>
   </div>
   <div class="fine-tune">
-    <span class="ft-label">base (depth_min)</span>
+    <span class="ft-label">profundidad valle (depth_min)</span>
     <button class="ft-btn" onclick="adjust('min',-5)">−</button>
     <input class="ft-input" id="val-min" type="number" onchange="setDepthMin(this.value)">
     <button class="ft-btn" onclick="adjust('min',+5)">+</button>
@@ -172,15 +172,22 @@ HTML = '''<!DOCTYPE html>
   var state = {depthMin: 640, depthMax: 715, mode: 'calibration', centerMean: null};
 
   // Color según profundidad (igual que el colormap del proyector)
-  function depthColor(center, dmin, dmax) {
-    if (center === null || dmax <= dmin) return '#1e3a5f';
-    var rng = dmax - dmin;
-    var norm = 1.0 - Math.max(0, Math.min(1, (center - dmin) / rng));
-    if (norm < 0.12) return '#00004a';
-    if (norm < 0.30) return '#003cb4';
-    if (norm < 0.55) return '#007820';
-    if (norm < 0.78) return '#b86000';
-    return '#8b0000';
+  // Aproxima el colormap bipolar real (colormap.py): 0.5 = elevacion cero
+  // (verde), sube hacia amarillo/naranja/rojo/blanco, baja hacia
+  // cian/azul/azul profundo. Mismos 8 tonos que el LUT real de OpenCV.
+  function depthColor(elev, depthMinVal, depthMaxVal) {
+    if (elev === null) return '#1e3a5f';
+    var norm = elev >= 0
+      ? 0.5 + 0.5 * Math.max(0, Math.min(1, elev / Math.max(1, depthMaxVal)))
+      : 0.5 - 0.5 * Math.max(0, Math.min(1, -elev / Math.max(1, depthMinVal)));
+    if (norm < 0.11) return '#000050';
+    if (norm < 0.29) return '#003cb4';
+    if (norm < 0.44) return '#00a0c8';
+    if (norm < 0.60) return '#00b450';
+    if (norm < 0.76) return '#b4d200';
+    if (norm < 0.88) return '#ffa000';
+    if (norm < 0.97) return '#c80000';
+    return '#ffffff';
   }
 
   function updateSensor(data) {
@@ -193,13 +200,15 @@ HTML = '''<!DOCTYPE html>
     document.getElementById('conn-txt').textContent = ok ? 'Kinect activo' : 'señal baja';
     var bg;
     if (data.floor_center !== undefined && data.floor_center >= 0) {
-      // Modo suelo: el render usa elevacion (floor - profundidad), no profundidad absoluta.
-      // depthColor invierte internamente, asi que se pasa (depthMax - elev) para
-      // reproducir el mismo mapeo que get_depth() sin duplicar la formula.
+      // Modo suelo: el render usa elevacion con signo (floor - profundidad),
+      // positiva = monticulo, negativa = valle -- mismo calculo que get_depth().
       var elev = data.floor_center - data.center_mean;
-      bg = depthColor(state.depthMax - elev, 0, state.depthMax);
+      bg = depthColor(elev, state.depthMin, state.depthMax);
     } else {
-      bg = depthColor(data.center_mean, state.depthMin, state.depthMax);
+      // Modo clasico (sin suelo fijado) -- previsualizacion simple, no bipolar.
+      var rng = Math.max(1, state.depthMax - state.depthMin);
+      var cnorm = 1.0 - Math.max(0, Math.min(1, (data.center_mean - state.depthMin) / rng));
+      bg = cnorm < 0.3 ? '#000050' : (cnorm < 0.6 ? '#00b450' : (cnorm < 0.85 ? '#ffa000' : '#ffffff'));
     }
     document.getElementById('sensor-card').style.background = bg;
   }

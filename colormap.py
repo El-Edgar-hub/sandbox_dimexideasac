@@ -5,14 +5,14 @@ import numpy as np
 def make_topo_colormap():
     # Colors in BGR order (OpenCV convention)
     colors = [
-        (0,   [80,  0,   0  ]),  # dark blue
-        (60,  [180, 60,  0  ]),  # blue
-        (100, [200, 160, 0  ]),  # cyan
-        (140, [80,  180, 0  ]),  # green
-        (180, [0,   210, 180]),  # yellow-green
-        (210, [0,   160, 255]),  # orange
-        (240, [0,   0,   200]),  # red
-        (255, [255, 255, 255]),  # white
+        (0,   [80,  0,   0  ]),  # azul profundo (valle mas hondo)
+        (55,  [180, 60,  0  ]),  # azul
+        (95,  [200, 160, 0  ]),  # cian
+        (128, [80,  180, 0  ]),  # verde (elevacion cero -- suelo fijado)
+        (180, [0,   210, 180]),  # amarillo-verde
+        (210, [0,   160, 255]),  # naranja
+        (240, [0,   0,   200]),  # rojo
+        (255, [255, 255, 255]),  # blanco (monticulo mas alto)
     ]
     lut = np.zeros((256, 1, 3), dtype=np.uint8)
     for i in range(len(colors) - 1):
