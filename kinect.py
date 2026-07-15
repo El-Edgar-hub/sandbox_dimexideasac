@@ -92,6 +92,11 @@ def get_depth(dev, data, timestamp):
     gray = (depth_norm * 255).astype(np.uint8)
     color = apply_colormap(gray)
 
+    crop = config.get('crop')
+    if crop is not None:
+        x0, y0, x1, y1 = crop
+        color = color[y0:y1, x0:x1]
+
     homography = config.get('homography')
     if homography is not None:
         h_matrix = np.array(homography, dtype=np.float32)
@@ -124,6 +129,55 @@ def reset_floor():
     floor_frame[0] = None
     if os.path.exists(FLOOR_FILE):
         os.remove(FLOOR_FILE)
+
+
+def detect_sand_crop(floor):
+    """Encuentra el rectangulo de arena dentro del frame del Kinect, a partir
+    de un snapshot de suelo plano y vacio (floor_frame). Distingue la arena
+    del marco de madera (mas cerca del Kinect) y del fondo mas alla de la
+    caja (mas lejos) por su banda de profundidad -- sin necesitar rastreo en
+    vivo ni gestos, evitando el ruido USB que afecto la deteccion de mano.
+    Nunca falla de forma destructiva: cualquier caso ambiguo devuelve
+    (None, mensaje, None), preservando pantalla completa sin recortar.
+    """
+    h, w = floor.shape
+    valid = (floor > 0) & (floor < 2047)
+    if np.count_nonzero(valid) < 0.5 * floor.size:
+        return None, 'cobertura insuficiente, se usa pantalla completa', None
+
+    depths = floor[valid]
+    hist, edges = np.histogram(depths, bins=64, range=(1, 2046))
+    peak = np.argmax(hist)
+    lo, hi = edges[peak], edges[peak + 1]
+    dominant = float(depths[(depths >= lo) & (depths < hi)].mean())
+
+    tol = 50.0  # gaps reales observados ~170-300 unidades entre marco/arena/fondo
+    mask = ((np.abs(floor - dominant) <= tol) & valid).astype(np.uint8) * 255
+    k = np.ones((7, 7), np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, k)   # limpia ruido puntual (corrupcion USB)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k)  # rellena huecos
+
+    n, _, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    if n <= 1:
+        return None, 'no se distinguió la arena del marco/fondo, se usa pantalla completa', None
+
+    best = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+    x, y = int(stats[best, cv2.CC_STAT_LEFT]), int(stats[best, cv2.CC_STAT_TOP])
+    bw, bh = int(stats[best, cv2.CC_STAT_WIDTH]), int(stats[best, cv2.CC_STAT_HEIGHT])
+    area = int(stats[best, cv2.CC_STAT_AREA])
+
+    if area < 0.15 * h * w or bw < 40 or bh < 40:
+        return None, f'área detectada demasiado pequeña ({bw}x{bh}px), se usa pantalla completa', None
+    if x <= 1 and y <= 1 and x + bw >= w - 1 and y + bh >= h - 1:
+        return None, 'no se detectó un borde real (ocupa todo el cuadro), se usa pantalla completa', None
+
+    crop = [x, y, x + bw, y + bh]
+    long_s, short_s = max(bw, bh), min(bw, bh)
+    ratio_expected = 71.0 / 41.0  # medidas reales de la arena
+    warn = None
+    if abs(long_s / short_s - ratio_expected) / ratio_expected > 0.30:
+        warn = f'área detectada ({bw}x{bh}px) no coincide con proporciones esperadas de la caja (41x71cm) — verifica visualmente'
+    return crop, f'área de arena detectada: {bw}x{bh}px en ({x},{y})', warn
 
 
 def _find_marker_point():

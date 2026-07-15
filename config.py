@@ -23,6 +23,7 @@ config = {
     'depth_max': 2000,
     'mode': 'calibration',
     'homography': None,   # matriz 3x3 (lista de listas) o None si no calibrada
+    'crop': None,          # [x0,y0,x1,y1] en espacio Kinect 640x480, o None
 }
 
 last_depth_frame = [None]

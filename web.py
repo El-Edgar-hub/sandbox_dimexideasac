@@ -2,7 +2,7 @@ import numpy as np
 from flask import Flask, render_template_string, request, jsonify
 
 from config import config, auto_calib_status, floor_frame, live_stretch, save_config, last_depth_frame, homography_step
-from kinect import auto_calibrate, calibrate_floor, reset_floor
+from kinect import auto_calibrate, calibrate_floor, reset_floor, detect_sand_crop
 
 app = Flask(__name__)
 
@@ -302,7 +302,10 @@ HTML = '''<!DOCTYPE html>
       btn.disabled = false; btn.textContent = '📷 Capturar Base Plana';
       if (data.error) { setFeedback('fb-base', '✗ ' + data.error, 'err'); return; }
       updateConfig(data);
-      setFeedback('fb-base', '✓ Base fijada en ' + data.depth_max, 'ok');
+      var msg = '✓ Base fijada en ' + data.depth_max;
+      if (data.crop_msg) msg += ' — ' + data.crop_msg;
+      if (data.crop_warn) msg += ' ⚠ ' + data.crop_warn;
+      setFeedback('fb-base', msg, data.crop_warn ? 'warn' : 'ok');
       document.getElementById('step1').classList.add('done');
       document.getElementById('num1').textContent = '✓';
     }).catch(function(){ btn.disabled=false; btn.textContent='📷 Capturar Base Plana'; });
@@ -411,6 +414,7 @@ def _payload():
         'live_stretch':     live_stretch[0],
         'homography_active': config.get('homography') is not None,
         'homography_step':   homography_step[0],
+        'crop_active':      config.get('crop') is not None,
     }
 
 
@@ -474,7 +478,16 @@ def set_base():
     if not calibrate_floor():
         return jsonify({'error': 'sin datos del Kinect'}), 503
     config['depth_max'] = int(np.mean(valid))  # valor informativo, no se usa para el render
-    return jsonify(_payload())
+
+    # Detecta automaticamente el rectangulo de arena (distinto del marco y de
+    # lo que hay mas alla de la caja) para que el render use solo esa area.
+    crop, crop_msg, crop_warn = detect_sand_crop(floor_frame[0])
+    config['crop'] = crop
+    payload = _payload()
+    payload['crop_msg'] = crop_msg
+    if crop_warn:
+        payload['crop_warn'] = crop_warn
+    return jsonify(payload)
 
 
 @app.route('/set_max_height', methods=['POST'])
