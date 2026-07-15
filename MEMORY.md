@@ -1,6 +1,6 @@
 # MEMORY.md — AR Sandbox (sandbox_dimexideasac)
 
-Ultima actualizacion: 2026-07-15 (commit `2736ac8`, branch `v2`).
+Ultima actualizacion: 2026-07-15 (commit `be4a83d`, branch `v2`).
 
 Este archivo es el que hay que leer primero para entender el estado actual
 del codigo y como se llego hasta aqui. `DEVELOPMENT.md` (fuera del repo,
@@ -28,6 +28,8 @@ Construido y en uso hoy:
   "Guardar").
 - Arranque automatico al encender la RPi via systemd (ver
   `systemd/sandbox.service`).
+- Vista previa en vivo del mapa de colores de la arena dentro de la app de
+  calibracion (`/preview.jpg`), en vez de solo un numero y un color plano.
 
 Construido pero **deshabilitado**: calibracion geometrica por homografia
 (4 esquinas con la mano). El codigo se conserva intacto en `homography.py`
@@ -152,6 +154,7 @@ LUT de 256 valores, BGR, bipolar con el verde fijo en el indice 128:
 | `/` | GET | Sirve la UI del asistente de calibracion |
 | `/status` | GET | `_payload()` — estado completo actual |
 | `/depth_stats` | GET | Lectura en vivo del centro del frame, para la tarjeta de sensor de la UI |
+| `/preview.jpg` | GET | Ultimo frame ya coloreado/recortado (el mismo que se proyecta), codificado a JPEG al vuelo, para la vista previa en vivo de la UI |
 | `/set_base` | POST | Paso 1: captura suelo plano + detecta recorte de arena + auto-guarda |
 | `/set_max_height` | POST | Legacy, no usado por ningun boton (gesto manual de altura) |
 | `/update` | POST | Ajuste manual de `depth_min`/`depth_max` + auto-guarda |
@@ -208,6 +211,11 @@ No hay rutas de homografia activas — se quitaron todas en el commit
     que arranca `main.py` solo al encender la RPi; fix de `HOME` (systemd
     con `User=root` ponia `HOME=/root` por defecto, y el proceso no
     encontraba la config/suelo guardados en `/home/fran`).
+14. **Vista previa en vivo en la app de calibracion** (`be4a83d`) — antes
+    solo se veia un numero y un color plano (promedio del centro); ahora
+    `/preview.jpg` sirve el mismo frame coloreado/recortado que se
+    proyecta, sin costo extra por frame (se codifica a JPEG solo cuando
+    se pide, no en cada callback del Kinect).
 
 ## Decisiones clave
 
