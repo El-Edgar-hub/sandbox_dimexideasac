@@ -41,20 +41,44 @@ def _update_live_stretch(depth):
         config['depth_max'] = int(alpha * new_max + (1 - alpha) * config['depth_max'])
 
 
-def draw_calibration_ui(frame):
+_DONE = (183, 231, 110)     # #6ee7b7 (BGR) -- mismo verde "listo" de la interfaz web
+_PENDING = (36, 191, 251)   # #fbbf24 (BGR) -- mismo ambar "pendiente" de la interfaz web
+_CALIB_BG = (216, 78, 29)   # #1d4ed8 (BGR) -- mismo azul del pill "CALIBRACION"
+_EXHIB_BG = (70, 95, 6)     # #065f46 (BGR) -- mismo verde del pill "EXHIBICION"
+
+
+def _draw_calibration_panel(frame):
     overlay = frame.copy()
     cv2.rectangle(overlay, (10, 10), (520, 175), (0, 0, 0), -1)
     cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
-    mode_label = 'MODO: ELEVACION SUELO' if floor_frame[0] is not None else 'MODO CALIBRACION'
-    cv2.putText(frame, mode_label, (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
-    cv2.putText(frame, f'depth_min: {config["depth_min"]}', (20, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
-    cv2.putText(frame, f'depth_max: {config["depth_max"]}', (20, 105), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
-    floor_txt = 'suelo: calibrado' if floor_frame[0] is not None else 'suelo: sin calibrar'
-    cv2.putText(frame, floor_txt, (20, 135), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 255), 1)
-    stretch_txt = 'live stretch: ON' if live_stretch[0] else 'live stretch: OFF'
-    stretch_color = (0, 255, 100) if live_stretch[0] else (150, 150, 150)
-    cv2.putText(frame, stretch_txt, (20, 165), cv2.FONT_HERSHEY_SIMPLEX, 0.5, stretch_color, 1)
+    cv2.rectangle(frame, (20, 18), (260, 50), _CALIB_BG, -1)
+    cv2.putText(frame, 'CALIBRACION', (30, 42), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+    floor_ok = floor_frame[0] is not None
+    range_ok = config.get('range_calibrated', False)
+    p1 = 'Paso 1: Suelo OK' if floor_ok else 'Paso 1: Suelo pendiente'
+    cv2.putText(frame, p1, (20, 85), cv2.FONT_HERSHEY_SIMPLEX, 0.6, _DONE if floor_ok else _PENDING, 2)
+    p2 = f'Paso 2: Rango OK (0-{config["depth_max"]}u)' if range_ok else 'Paso 2: Rango pendiente'
+    cv2.putText(frame, p2, (20, 115), cv2.FONT_HERSHEY_SIMPLEX, 0.6, _DONE if range_ok else _PENDING, 2)
+    cv2.putText(frame, f'depth_min:{config["depth_min"]}  depth_max:{config["depth_max"]}',
+                (20, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (140, 140, 140), 1)
     return frame
+
+
+def _draw_exhibition_badge(frame):
+    h, w = frame.shape[:2]
+    label = 'EXHIBICION'
+    (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+    x1, y1 = w - tw - 30, 10
+    x2, y2 = w - 10, 20 + th
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (x1, y1), (x2, y2), _EXHIB_BG, -1)
+    cv2.addWeighted(overlay, 0.55, frame, 0.45, 0, frame)
+    cv2.putText(frame, label, (x1 + 10, y2 - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.6, _DONE, 2)
+    return frame
+
+
+def draw_status_overlay(frame):
+    return _draw_exhibition_badge(frame) if config['mode'] == 'exhibition' else _draw_calibration_panel(frame)
 
 
 def draw_corner_target(frame, step):
@@ -108,8 +132,8 @@ def get_depth(dev, data, timestamp):
 
     if homography_step[0] >= 0:
         display = draw_corner_target(display, homography_step[0])
-    elif config['mode'] == 'calibration':
-        display = draw_calibration_ui(display)
+    else:
+        display = draw_status_overlay(display)
 
     cv2.imshow('Sandbox', display)
     cv2.waitKey(1)
@@ -129,6 +153,7 @@ def calibrate_floor():
 
 def reset_floor():
     floor_frame[0] = None
+    config['range_calibrated'] = False
     if os.path.exists(FLOOR_FILE):
         os.remove(FLOOR_FILE)
 
@@ -374,6 +399,7 @@ def auto_calibrate():
         max_elev = int(np.percentile(valid_elev, 95))
         config['depth_min'] = 0
         config['depth_max'] = max(max_elev + 20, 30)
+        config['range_calibrated'] = True
         auto_calib_status[0] = f'OK: elevacion 0-{config["depth_max"]} unidades'
     else:
         valid = depth[(depth > 0) & (depth < 2047)]
@@ -384,4 +410,5 @@ def auto_calibrate():
         p98 = int(np.percentile(valid, 98))
         config['depth_min'] = max(0, p2 - 5)
         config['depth_max'] = min(2047, p98 + 5)
+        config['range_calibrated'] = True
         auto_calib_status[0] = f'OK: min={config["depth_min"]} max={config["depth_max"]}'

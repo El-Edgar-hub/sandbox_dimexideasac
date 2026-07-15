@@ -226,6 +226,12 @@ HTML = '''<!DOCTYPE html>
       var fs = document.getElementById('floor-status');
       fs.textContent = data.floor_active ? 'suelo: calibrado' : 'suelo: sin calibrar';
       fs.style.color = data.floor_active ? '#6ee7b7' : '#fbbf24';
+      document.getElementById('step1').classList.toggle('done', data.floor_active);
+      document.getElementById('num1').textContent = data.floor_active ? '✓' : '1';
+    }
+    if (data.range_calibrated !== undefined) {
+      document.getElementById('step2').classList.toggle('done', data.range_calibrated);
+      document.getElementById('num2').textContent = data.range_calibrated ? '✓' : '2';
     }
     if (data.homography_active !== undefined) refreshGeoUI(data);
   }
@@ -309,8 +315,6 @@ HTML = '''<!DOCTYPE html>
       if (data.crop_msg) msg += ' — ' + data.crop_msg;
       if (data.crop_warn) msg += ' ⚠ ' + data.crop_warn;
       setFeedback('fb-base', msg, data.crop_warn ? 'warn' : 'ok');
-      document.getElementById('step1').classList.add('done');
-      document.getElementById('num1').textContent = '✓';
     }).catch(function(){ btn.disabled=false; btn.textContent='📷 Capturar Base Plana'; });
   }
 
@@ -337,10 +341,6 @@ HTML = '''<!DOCTYPE html>
       updateConfig(data);
       var isError = (data.status || '').indexOf('Error') === 0;
       setFeedback('fb-height', (isError ? '✗ ' : '✓ ') + data.status, isError ? 'err' : 'ok');
-      if (!isError) {
-        document.getElementById('step2').classList.add('done');
-        document.getElementById('num2').textContent = '✓';
-      }
     }).catch(function(){ btn.disabled=false; btn.textContent='📊 Auto Calibrar Rango'; });
   }
 
@@ -427,6 +427,7 @@ def _payload():
         'homography_active': config.get('homography') is not None,
         'homography_step':   homography_step[0],
         'crop_active':      config.get('crop') is not None,
+        'range_calibrated': config.get('range_calibrated', False),
     }
 
 
