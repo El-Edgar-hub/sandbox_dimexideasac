@@ -2,7 +2,7 @@ import numpy as np
 from flask import Flask, render_template_string, request, jsonify
 
 from config import config, auto_calib_status, floor_frame, live_stretch, save_config, last_depth_frame, homography_step
-from kinect import auto_calibrate, calibrate_floor, reset_floor, detect_sand_crop
+from calibration import auto_calibrate, calibrate_floor, reset_floor, detect_sand_crop, get_effective_floor
 
 app = Flask(__name__)
 
@@ -113,8 +113,14 @@ HTML = '''<!DOCTYPE html>
     <div class="step-num" id="num1">1</div>
     <div class="step-title">Calibrar Base</div>
   </div>
-  <p class="step-desc">Deja la arena <b>completamente plana y vacía</b>, luego captura el nivel base.</p>
+  <p class="step-desc">Deja la arena <b>completamente plana y vacía</b>, luego captura el nivel base. Si subes/bajas el nivel de la arena después, puedes mover el nivel cero aquí sin volver a capturar.</p>
   <button class="btn-capture btn-base" id="btn-base" onclick="captureBase()">📷 Capturar Base Plana</button>
+  <div class="fine-tune">
+    <span class="ft-label">nivel cero (offset)</span>
+    <button class="ft-btn" onclick="adjustZero(-5)">−</button>
+    <input class="ft-input" id="val-zero" type="number" onchange="setZeroOffset(this.value)">
+    <button class="ft-btn" onclick="adjustZero(+5)">+</button>
+  </div>
   <!-- fine-tune de depth_max oculto aqui: este valor es solo informativo en
        modo suelo, el que de verdad importa para el render es el del Paso 2 -->
   <div class="fine-tune" style="display:none">
@@ -169,7 +175,7 @@ HTML = '''<!DOCTYPE html>
 </div>
 
 <script>
-  var state = {depthMin: 640, depthMax: 715, mode: 'calibration', centerMean: null};
+  var state = {depthMin: 640, depthMax: 715, zeroOffset: 0, mode: 'calibration', centerMean: null};
 
   // Color según profundidad (igual que el colormap del proyector)
   // Aproxima el colormap bipolar real (colormap.py): 0.5 = elevacion cero
@@ -220,6 +226,10 @@ HTML = '''<!DOCTYPE html>
     document.getElementById('val-max').textContent = data.depth_max;
     document.getElementById('val-max2').value = data.depth_max;
     document.getElementById('val-min').value = data.depth_min;
+    if (data.zero_offset !== undefined) {
+      state.zeroOffset = data.zero_offset;
+      document.getElementById('val-zero').value = data.zero_offset;
+    }
     var pill = document.getElementById('mode-pill');
     if (data.mode === 'exhibition') {
       pill.textContent = 'EXHIBICIÓN';
@@ -382,6 +392,19 @@ HTML = '''<!DOCTYPE html>
     }).then(function(r){ return r.json(); }).then(updateConfig);
   }
 
+  function setZeroOffset(val) {
+    var offset = Math.max(-2046, Math.min(2046, parseInt(val, 10) || 0));
+    fetch('/set_zero_offset', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({zero_offset: offset})
+    }).then(function(r){ return r.json(); }).then(updateConfig);
+  }
+
+  function adjustZero(delta) {
+    setZeroOffset(state.zeroOffset + delta);
+  }
+
   function save() {
     fetch('/save', {method:'POST'}).then(function(r){ return r.json(); }).then(function(d) {
       var btn = document.querySelector('.btn-save');
@@ -445,6 +468,7 @@ def _payload():
         'homography_step':   homography_step[0],
         'crop_active':      config.get('crop') is not None,
         'range_calibrated': config.get('range_calibrated', False),
+        'zero_offset':      config.get('zero_offset', 0),
     }
 
 
@@ -479,6 +503,7 @@ def depth_stats():
     cx, cy = w // 2, h // 2
     center = d[cy-20:cy+20, cx-20:cx+20]
     cv = center[(center > 0) & (center < 2047)]
+    eff_floor = get_effective_floor()
     return jsonify({
         'frame_min':   int(valid.min())  if len(valid) else -1,
         'frame_max':   int(valid.max())  if len(valid) else -1,
@@ -486,8 +511,8 @@ def depth_stats():
         'center_mean': int(cv.mean())    if len(cv)    else -1,
         'center_min':  int(cv.min())     if len(cv)    else -1,
         'valid_pct':   round(len(valid) / d.size * 100, 1),
-        'floor_center': int(floor_frame[0][cy-20:cy+20, cx-20:cx+20].mean())
-                        if floor_frame[0] is not None else -1,
+        'floor_center': int(eff_floor[cy-20:cy+20, cx-20:cx+20].mean())
+                        if eff_floor is not None else -1,
     })
 
 
@@ -513,6 +538,7 @@ def set_base():
     # lo que hay mas alla de la caja) para que el render use solo esa area.
     crop, crop_msg, crop_warn = detect_sand_crop(floor_frame[0])
     config['crop'] = crop
+    save_config()  # persiste de inmediato -- no depende de presionar "Guardar"
     payload = _payload()
     payload['crop_msg'] = crop_msg
     if crop_warn:
@@ -548,12 +574,21 @@ def update():
     data = request.json
     config['depth_min'] = int(data['depth_min'])
     config['depth_max'] = int(data['depth_max'])
+    save_config()
     return jsonify(_payload())
 
 
 @app.route('/mode', methods=['POST'])
 def set_mode():
     config['mode'] = request.json['mode']
+    save_config()
+    return jsonify(_payload())
+
+
+@app.route('/set_zero_offset', methods=['POST'])
+def set_zero_offset():
+    config['zero_offset'] = int(request.json['zero_offset'])
+    save_config()
     return jsonify(_payload())
 
 
@@ -567,6 +602,8 @@ def save():
 @app.route('/auto_calibrate', methods=['POST'])
 def auto_calibrate_route():
     auto_calibrate()
+    if config.get('range_calibrated'):
+        save_config()  # persiste de inmediato -- no depende de presionar "Guardar"
     p = _payload()
     p['status'] = auto_calib_status[0]
     return jsonify(p)

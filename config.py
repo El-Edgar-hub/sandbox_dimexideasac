@@ -25,6 +25,8 @@ config = {
     'homography': None,   # matriz 3x3 (lista de listas) o None si no calibrada
     'crop': None,          # [x0,y0,x1,y1] en espacio Kinect 640x480, o None
     'range_calibrated': False,   # True solo cuando auto_calibrate() midio un rango real
+    'zero_offset': 0,      # unidades crudas restadas a floor_frame antes de medir elevacion
+                            # (positivo = sube el nivel cero, ver calibration.get_effective_floor)
 }
 
 last_depth_frame = [None]
