@@ -132,19 +132,18 @@ HTML = '''<!DOCTYPE html>
     <div class="step-num" id="num2">2</div>
     <div class="step-title">Calibrar Rango de Color</div>
   </div>
-  <p class="step-desc">Construye montículos/valles en la arena, luego presiona Auto Calibrar Rango — se ajusta automáticamente al relieve real.</p>
+  <p class="step-desc">Construye montículos/valles en la arena, luego presiona Auto Calibrar Rango — se ajusta automáticamente al relieve real. También puedes ajustar la base y el techo manualmente, a tu gusto.</p>
   <button class="btn-capture btn-height" id="btn-height" onclick="autoCalibrateRange()">📊 Auto Calibrar Rango</button>
   <div class="fine-tune">
-    <span class="ft-label">depth_max</span>
+    <span class="ft-label">techo (depth_max)</span>
     <button class="ft-btn" onclick="adjust('max',-5)">−</button>
     <input class="ft-input" id="val-max2" type="number" onchange="setDepthMax(this.value)">
     <button class="ft-btn" onclick="adjust('max',+5)">+</button>
   </div>
-  <!-- fine-tune de depth_min oculto: en modo suelo debe quedar fijo en 0 (ver get_depth) -->
-  <div class="fine-tune" style="display:none">
-    <span class="ft-label">depth_min</span>
+  <div class="fine-tune">
+    <span class="ft-label">base (depth_min)</span>
     <button class="ft-btn" onclick="adjust('min',-5)">−</button>
-    <span class="ft-val" id="val-min">---</span>
+    <input class="ft-input" id="val-min" type="number" onchange="setDepthMin(this.value)">
     <button class="ft-btn" onclick="adjust('min',+5)">+</button>
   </div>
   <div class="feedback" id="fb-height"></div>
@@ -211,7 +210,7 @@ HTML = '''<!DOCTYPE html>
     state.mode = data.mode;
     document.getElementById('val-max').textContent = data.depth_max;
     document.getElementById('val-max2').value = data.depth_max;
-    document.getElementById('val-min').textContent = data.depth_min;
+    document.getElementById('val-min').value = data.depth_min;
     var pill = document.getElementById('mode-pill');
     if (data.mode === 'exhibition') {
       pill.textContent = 'EXHIBICIÓN';
@@ -362,6 +361,15 @@ HTML = '''<!DOCTYPE html>
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify({depth_min: state.depthMin, depth_max: dmax})
+    }).then(function(r){ return r.json(); }).then(updateConfig);
+  }
+
+  function setDepthMin(val) {
+    var dmin = Math.max(0, Math.min(2046, parseInt(val, 10) || state.depthMin));
+    fetch('/update', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({depth_min: dmin, depth_max: state.depthMax})
     }).then(function(r){ return r.json(); }).then(updateConfig);
   }
 
