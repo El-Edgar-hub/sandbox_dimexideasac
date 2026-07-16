@@ -29,6 +29,8 @@ config = {
                             # (positivo = sube el nivel cero, ver calibration.get_effective_floor)
     'geo_corners': None,    # [[x,y]x4] TL,TR,BR,BL en espacio 1920x1080, o None
                             # (None == pantalla completa, ver calibration.current_geo_corners)
+    'kinect_quad': None,    # [[x,y]x4] TL,TR,BR,BL en espacio Kinect nativo 640x480, o None
+                            # (None == usa el rectangulo de crop, ver calibration.extract_sand_quad)
 }
 
 last_depth_frame = [None]

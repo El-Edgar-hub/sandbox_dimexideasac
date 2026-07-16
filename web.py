@@ -9,6 +9,7 @@ from config import (
 from calibration import (
     auto_calibrate, calibrate_floor, reset_floor, detect_sand_crop, get_effective_floor,
     current_geo_corners, nudge_geo_corner, reset_geo_corners, recompute_geo_homography,
+    extract_sand_quad, check_quad_against_measurements,
 )
 
 app = Flask(__name__)
@@ -599,6 +600,7 @@ def _payload():
         'range_calibrated': config.get('range_calibrated', False),
         'zero_offset':      config.get('zero_offset', 0),
         'geo_active':       config.get('geo_corners') is not None,
+        'quad_active':      config.get('kinect_quad') is not None,
     }
 
 
@@ -679,10 +681,25 @@ def set_base():
     # lo que hay mas alla de la caja) para que el render use solo esa area.
     crop, crop_msg, crop_warn = detect_sand_crop(floor_frame[0])
     config['crop'] = crop
-    recompute_geo_homography()  # si ya habia geometria ajustada, la recalcula con el nuevo recorte
+
+    quad = quad_msg = None
+    if crop is not None:
+        quad, quad_msg, quad_warn = extract_sand_quad(floor_frame[0])
+        if quad_warn and not crop_warn:
+            crop_warn = quad_warn
+    config['kinect_quad'] = quad  # siempre reasignado -- None limpia una forma vieja
+
+    recompute_geo_homography()  # si ya habia geometria ajustada, la recalcula con el nuevo recorte/forma
     save_config()  # persiste de inmediato -- no depende de presionar "Guardar"
     payload = _payload()
     payload['crop_msg'] = crop_msg
+    if quad is not None:
+        payload['quad_msg'] = quad_msg
+        ok, detail = check_quad_against_measurements(quad, floor_frame[0])
+        print(f'[calib-quad] {detail}', flush=True)
+        if not ok:
+            check_warn = f'verificación de distancias: {detail}'
+            crop_warn = (crop_warn + ' | ' + check_warn) if crop_warn else check_warn
     if crop_warn:
         payload['crop_warn'] = crop_warn
     return jsonify(payload)

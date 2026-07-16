@@ -41,7 +41,8 @@ def get_depth(dev, data, timestamp):
     depth_norm[invalid] = 0.0
 
     gray = (depth_norm * 255).astype(np.uint8)
-    color = apply_colormap(gray)
+    full_color = apply_colormap(gray)
+    color = full_color
 
     crop = config.get('crop')
     if crop is not None:
@@ -55,9 +56,16 @@ def get_depth(dev, data, timestamp):
     last_preview_frame[0] = color
 
     homography = config.get('homography')
+    kinect_quad = config.get('kinect_quad')
     if homography is not None:
         h_matrix = np.array(homography, dtype=np.float32)
-        display = cv2.warpPerspective(color, h_matrix, (DISPLAY_WIDTH, DISPLAY_HEIGHT))
+        # kinect_quad presente -> el lado "src" de la homografia esta en
+        # coordenadas del frame COMPLETO (ver calibration._apply_geo_corners),
+        # no del recorte -- hay que deformar desde el frame sin recortar.
+        # kinect_quad ausente -> comportamiento de siempre (src = rectangulo
+        # relativo al recorte).
+        warp_src = full_color if kinect_quad is not None else color
+        display = cv2.warpPerspective(warp_src, h_matrix, (DISPLAY_WIDTH, DISPLAY_HEIGHT))
     else:
         display = cv2.resize(color, (DISPLAY_WIDTH, DISPLAY_HEIGHT))
 
