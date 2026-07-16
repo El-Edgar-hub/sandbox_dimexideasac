@@ -1,6 +1,6 @@
 # MEMORY.md — AR Sandbox (sandbox_dimexideasac)
 
-Ultima actualizacion: 2026-07-15 (commit `b9d48c4`, branch `v2`).
+Ultima actualizacion: 2026-07-15 (commit `59eb2ac`, branch `v2`).
 
 Este archivo es el que hay que leer primero para entender el estado actual
 del codigo y como se llego hasta aqui. `DEVELOPMENT.md` (fuera del repo,
@@ -38,6 +38,12 @@ Construido y en uso hoy:
   aplicacion (`config['homography']` + `cv2.warpPerspective`), pero la
   matriz se calcula desde 4 puntos que el usuario ajusta a ojo, sin que el
   Kinect tenga que detectar nada — inmune al ruido USB.
+- Forma real de la arena extraída de los datos de profundidad
+  (`config['kinect_quad']`, `calibration.extract_sand_quad()`) en vez de
+  asumir un rectángulo alineado a los ejes — corrige la inclinación real
+  del Kinect respecto a la caja en el lado *origen* de la homografía (el
+  Paso 3 de arriba corrige el lado *destino*, el del proyector). Se activa
+  al presionar "Capturar Base Plana" de nuevo con este código.
 
 Construido pero **deshabilitado**: calibracion geometrica por homografia
 (4 esquinas con la mano). El codigo se conserva intacto en `homography.py`
@@ -59,7 +65,9 @@ geometria (punto anterior) es la via que se usa hoy en su lugar.
 - **`kinect.py`** — solo `get_depth()`/`get_video()`, los callbacks que
   usa `freenect.runloop`. Por frame: calcula elevacion (via
   `calibration.get_effective_floor()`), aplica el colormap, recorta,
-  aplica homografia si existe, dibuja el overlay de estado, y muestra.
+  aplica homografia si existe (deformando el frame COMPLETO en vez del
+  recortado cuando `config['kinect_quad']` esta presente — ver
+  "Decisiones clave"), dibuja el overlay de estado, y muestra.
 - **`overlay.py`** — todo lo que se dibuja encima del frame ya renderizado:
   el panel de calibracion (paso 1/2), el badge de "EXHIBICION", y la marca
   de esquina para la calibracion de homografia (sin usar hoy).
@@ -67,7 +75,12 @@ geometria (punto anterior) es la via que se usa hoy en su lugar.
   `calibrate_floor()`/`reset_floor()` (captura/borra el suelo de
   referencia), `get_effective_floor()` (suelo + `zero_offset`),
   `_update_live_stretch()` (ajuste continuo opcional, no usado por
-  defecto), `detect_sand_crop()` (recorte automatico del area de arena),
+  defecto), `detect_sand_crop()` (recorte rectangular del area de arena,
+  ahora envoltorio delgado sobre `_dominant_sand_component()`),
+  `extract_sand_quad()` (forma REAL, no rectangular, de la arena —
+  comparte la seleccion de blob con `detect_sand_crop` via
+  `_dominant_sand_component`), `check_quad_against_measurements()`
+  (verificacion de sanidad contra medidas fisicas a cinta metrica),
   `auto_calibrate()` (mide el relieve real y fija el rango de color),
   `current_geo_corners()`/`nudge_geo_corner()`/`reset_geo_corners()`/
   `recompute_geo_homography()` (ajuste manual de keystone, ver abajo).
@@ -99,6 +112,8 @@ config = {
     'zero_offset': 0,            # unidades crudas restadas a floor_frame (ver abajo)
     'geo_corners': None,          # [[x,y]x4] TL,TR,BR,BL en 1920x1080, o None
                                   # (None == pantalla completa, ver Paso 3 / keystone manual)
+    'kinect_quad': None,          # [[x,y]x4] TL,TR,BR,BL en espacio Kinect 640x480, o None
+                                  # (None == usa el rectangulo de crop, ver extract_sand_quad)
 }
 ```
 
@@ -168,7 +183,7 @@ LUT de 256 valores, BGR, bipolar con el verde fijo en el indice 128:
 | `/status` | GET | `_payload()` — estado completo actual |
 | `/depth_stats` | GET | Lectura en vivo del centro del frame, para la tarjeta de sensor de la UI |
 | `/preview.jpg` | GET | Ultimo frame ya coloreado/recortado (el mismo que se proyecta), codificado a JPEG al vuelo, para la vista previa en vivo de la UI |
-| `/set_base` | POST | Paso 1: captura suelo plano + detecta recorte de arena + auto-guarda |
+| `/set_base` | POST | Paso 1: captura suelo plano + detecta recorte de arena + extrae su forma real + auto-guarda |
 | `/set_max_height` | POST | Legacy, no usado por ningun boton (gesto manual de altura) |
 | `/update` | POST | Ajuste manual de `depth_min`/`depth_max` + auto-guarda |
 | `/mode` | POST | Cambia `calibration`/`exhibition` + auto-guarda |
@@ -240,6 +255,19 @@ No hay rutas de homografia activas — se quitaron todas en el commit
     calibrar. Por defecto (`geo_corners=None`) es geometricamente idéntico
     al `cv2.resize` de siempre, asi que no cambia nada hasta que se ajusta
     una esquina.
+16. **Extraccion de la forma real de la arena** (`59eb2ac`) — el usuario
+    midio con cinta metrica la distancia del Kinect a la arena en las 4
+    esquinas (98/94/102/96cm), confirmando una inclinacion real. Se evaluo
+    reconstruir esa inclinacion con trigonometria (posicion + orientacion
+    del Kinect) pero se descarto por mal condicionada (el Kinect apunta
+    casi derecho hacia abajo, ~7° de la vertical, lo que hace inestable el
+    calculo de "hacia que lado esta inclinado" — una prueba con los
+    numeros reales puso una esquina fuera del cuadro). En su lugar,
+    `extract_sand_quad()` traza el contorno real directamente de los
+    datos de profundidad ya capturados, sin necesitar saber nada del
+    montaje fisico. Reemplaza el rectangulo ingenuo como lado "origen" de
+    la homografia (`config['kinect_quad']`), complementando el Paso 3
+    (que corrige el lado "destino", el del proyector).
 
 ## Decisiones clave
 
@@ -294,6 +322,25 @@ No hay rutas de homografia activas — se quitaron todas en el commit
   ruta con auto-guardado debe respaldar `~/sandbox_config.json` antes (igual
   que ya se hacia con `sandbox_floor.npy`), o evitar llamar esas rutas
   directamente.
+- **Por que se descarto la trigonometria para corregir el lado Kinect**:
+  con 4 distancias medidas + el tamano real de la caja se puede triangular
+  la posicion del Kinect, pero no su orientacion (las distancias no llevan
+  informacion de rumbo) — hace falta asumir que apunta al centro y que no
+  tiene "roll". Como el Kinect apunta casi derecho hacia abajo, esa segunda
+  cuenta se vuelve numericamente inestable (division por un valor casi
+  cero). Se prefirio extraer la forma real directamente de `floor_frame`
+  (dato ya capturado, cero suposiciones sobre el montaje) en vez de
+  calcularla con angulos.
+- **Verificacion de las 4 esquinas contra las medidas fisicas**: al probar
+  `check_quad_against_measurements()` contra el suelo real, el eje
+  arriba/abajo coincidio exacto con lo medido, pero izquierda/derecha salio
+  invertido. Diagnostico: es casi seguro un espejo entre el punto de vista
+  del usuario (de espaldas a la pared) y como el Kinect ve la imagen
+  internamente — que solo UN eje este invertido mientras el otro coincide
+  perfecto es la firma tipica de esto, no de un error de extraccion. No se
+  "corrigio" el codigo por esto; si se repite la verificacion y se quiere
+  que deje de marcar esta discrepancia esperada, hay que invertir las
+  etiquetas izquierda/derecha en `MEASURED_DISTANCES_CM`, no la logica.
 - **Por que `HOME=/home/fran` explicito en el servicio systemd**:
   `config.py` usa `os.path.expanduser('~')` para ubicar
   `sandbox_config.json`/`sandbox_floor.npy`. systemd con `User=root` fija
@@ -304,6 +351,11 @@ No hay rutas de homografia activas — se quitaron todas en el commit
 
 ## Pendientes
 
+- Tras desplegar la extraccion de forma real (`59eb2ac`), falta que el
+  usuario presione "Capturar Base Plana" de nuevo (para poblar
+  `kinect_quad` por primera vez) y luego reajuste el Paso 3 mirando la
+  proyeccion real — el calculo de origen cambio, casi seguro ya no
+  coincide con el ajuste anterior de geometria.
 - Calibracion geometrica por deteccion de mano sigue deshabilitada —
   retomarla requeriria hardware mas estable (fuente de alimentacion sin
   subvoltaje) o una tecnica de deteccion distinta. El ajuste manual de
