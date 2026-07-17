@@ -1,3 +1,7 @@
+import os
+import threading
+import time
+
 import cv2
 import numpy as np
 from flask import Flask, render_template_string, request, jsonify, Response
@@ -264,6 +268,19 @@ HTML = '''<!DOCTYPE html>
   <button class="btn-exhib" onclick="setExhibition()">🎬 Exhibición</button>
 </div>
 
+<!-- CONTROL DE ENERGIA -->
+<div class="step-card" id="power-card" style="margin-top:12px">
+  <div class="step-header">
+    <div class="step-title">Control de Energía</div>
+  </div>
+  <p class="step-desc">Detener el programa lo pausa -- para volver a arrancarlo hace falta SSH, la app de Mac, o reiniciar la RPi (arranca solo). Apagar la RPi la apaga por completo.</p>
+  <div class="footer" style="margin-top:0">
+    <button class="btn-save" style="background:#374151;color:#e5e7eb" onclick="stopProgram()">⏸ Detener Programa</button>
+    <button class="btn-exhib" style="background:#7f1d1d;color:#fca5a5;border-color:transparent" onclick="shutdownRpi()">⏻ Apagar RPi</button>
+  </div>
+  <div class="feedback" id="fb-power"></div>
+</div>
+
 <script>
   var state = {depthMin: 640, depthMax: 715, zeroOffset: 0, mode: 'calibration', centerMean: null};
 
@@ -522,6 +539,20 @@ HTML = '''<!DOCTYPE html>
     });
   }
 
+  function stopProgram() {
+    if (!confirm('¿Detener el programa? Para volver a arrancarlo vas a necesitar SSH, la app de Mac, o reiniciar la RPi.')) return;
+    fetch('/stop_program', {method:'POST'}).then(function(r){ return r.json(); }).then(function(d){
+      setFeedback('fb-power', d.msg || 'Deteniendo...', 'warn');
+    });
+  }
+
+  function shutdownRpi() {
+    if (!confirm('¿Apagar la Raspberry Pi por completo?')) return;
+    fetch('/shutdown_rpi', {method:'POST'}).then(function(r){ return r.json(); }).then(function(d){
+      setFeedback('fb-power', d.msg || 'Apagando...', 'warn');
+    });
+  }
+
   function save() {
     fetch('/save', {method:'POST'}).then(function(r){ return r.json(); }).then(function(d) {
       var btn = document.querySelector('.btn-save');
@@ -772,6 +803,27 @@ def reset_geometry_route():
 def save():
     save_config()
     return jsonify({'msg': 'Configuracion guardada'})
+
+
+def _delayed_run(cmd, delay=1.5):
+    """Corre un comando de sistema tras una pequena pausa -- da tiempo a que
+    la respuesta HTTP llegue al telefono antes de que el proceso/la RPi se
+    detengan. El proceso ya corre como root (ver systemd/sandbox.service),
+    no hace falta sudo."""
+    time.sleep(delay)
+    os.system(cmd)
+
+
+@app.route('/stop_program', methods=['POST'])
+def stop_program_route():
+    threading.Thread(target=_delayed_run, args=('systemctl stop sandbox.service',), daemon=True).start()
+    return jsonify({'msg': 'Deteniendo el programa...'})
+
+
+@app.route('/shutdown_rpi', methods=['POST'])
+def shutdown_rpi_route():
+    threading.Thread(target=_delayed_run, args=('shutdown -h now',), daemon=True).start()
+    return jsonify({'msg': 'Apagando la Raspberry Pi...'})
 
 
 # Usada por el Paso 2 del asistente ("Auto Calibrar Rango")
