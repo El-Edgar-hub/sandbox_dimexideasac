@@ -1,6 +1,6 @@
 # MEMORY.md — AR Sandbox (sandbox_dimexideasac)
 
-Ultima actualizacion: 2026-07-15 (commit `59eb2ac`, branch `v2`).
+Ultima actualizacion: 2026-07-20 (commit `34bff15`, branch `v2`).
 
 Este archivo es el que hay que leer primero para entender el estado actual
 del codigo y como se llego hasta aqui. `DEVELOPMENT.md` (fuera del repo,
@@ -43,7 +43,17 @@ Construido y en uso hoy:
   asumir un rectángulo alineado a los ejes — corrige la inclinación real
   del Kinect respecto a la caja en el lado *origen* de la homografía (el
   Paso 3 de arriba corrige el lado *destino*, el del proyector). Se activa
-  al presionar "Capturar Base Plana" de nuevo con este código.
+  al presionar "Capturar Base Plana" de nuevo con este código — ya
+  confirmado activo en producción (`quad_active: true`) tras que el
+  usuario recapturara la base y reajustara el Paso 3.
+- Control de energía desde el celular (`/restart_program`,
+  `/stop_program`, `/shutdown_rpi`) — antes solo existía en la app de Mac
+  (un servidor separado que corre en la Mac, no en la RPi). "Reiniciar" sí
+  puede autoservirse (systemd levanta una instancia nueva); "Detener" no
+  deja nada corriendo para un "Arrancar" futuro desde la misma página —
+  para eso hace falta SSH, la app de Mac, o reiniciar la RPi.
+- El servicio systemd se autorepara: `Restart=always` (antes
+  `on-failure`) + `StartLimitIntervalSec=0` — ver "Decisiones clave".
 
 Construido pero **deshabilitado**: calibracion geometrica por homografia
 (4 esquinas con la mano). El codigo se conserva intacto en `homography.py`
@@ -190,6 +200,9 @@ LUT de 256 valores, BGR, bipolar con el verde fijo en el indice 128:
 | `/set_zero_offset` | POST | Mueve el nivel cero (`zero_offset`) + auto-guarda |
 | `/nudge_corner` | POST | Paso 3: mueve una esquina de geometria (keystone) + auto-guarda |
 | `/reset_geometry` | POST | Quita el ajuste manual de geometria (vuelve a pantalla completa) + auto-guarda |
+| `/restart_program` | POST | `systemctl restart sandbox.service` tras una pausa corta (en un hilo aparte, para que la respuesta HTTP llegue antes de que el proceso se caiga) |
+| `/stop_program` | POST | `systemctl stop sandbox.service` (mismo patron de hilo con pausa) |
+| `/shutdown_rpi` | POST | `shutdown -h now` (mismo patron de hilo con pausa) |
 | `/save` | POST | Guarda `config` a disco explicitamente (boton "Guardar", ya no estrictamente necesario) |
 | `/auto_calibrate` | POST | Paso 2: mide relieve real y fija el rango de color + auto-guarda si queda calibrado |
 | `/calibrate_floor` | POST | Legacy, no expuesto en la UI |
@@ -268,6 +281,27 @@ No hay rutas de homografia activas — se quitaron todas en el commit
     montaje fisico. Reemplaza el rectangulo ingenuo como lado "origen" de
     la homografia (`config['kinect_quad']`), complementando el Paso 3
     (que corrige el lado "destino", el del proyector).
+17. **Control de energia desde el celular** (`e69bb5f`) — la app de Mac
+    tiene botones de Arrancar/Apagar/Apagar RPi, pero corren en un
+    servidor Flask separado en la Mac; un celular que abre
+    `Fran.local:5000` directamente nunca los vio ni los vera. Se agregan
+    `/stop_program` y `/shutdown_rpi` a la propia app de la RPi (ya corre
+    como root via systemd, no hace falta sudo), con un pequeno delay en un
+    hilo aparte para que la respuesta HTTP llegue al telefono antes de que
+    el proceso/la RPi se detengan.
+18. **Boton de reiniciar + auto-reparacion del servicio** (`34bff15`) —
+    a diferencia de "Detener", "Reiniciar" (`/restart_program`,
+    `systemctl restart`) si puede autoservirse desde el celular: el
+    proceso actual sigue vivo al presionarlo, systemd detiene esa
+    instancia y levanta una nueva. Ademas, `systemd/sandbox.service` pasa
+    de `Restart=on-failure` a `Restart=always` (+ `StartLimitIntervalSec=0`)
+    porque se observo el Kinect fallando al inicializar justo despues de
+    arrancar ("Error: Can't open device"), lo cual hace que `main.py` salga
+    con status 0 (no cuenta como fallo para `on-failure`) llevandose consigo
+    tambien al servidor Flask -- dejando la app completamente inalcanzable
+    hasta un restart manual por SSH. Confirmado en vivo el mismo dia: tras
+    un restart, el Kinect fallo, systemd reintento solo ~6s despues sin
+    intervencion, y la segunda instancia quedo sana.
 
 ## Decisiones clave
 
@@ -351,11 +385,6 @@ No hay rutas de homografia activas — se quitaron todas en el commit
 
 ## Pendientes
 
-- Tras desplegar la extraccion de forma real (`59eb2ac`), falta que el
-  usuario presione "Capturar Base Plana" de nuevo (para poblar
-  `kinect_quad` por primera vez) y luego reajuste el Paso 3 mirando la
-  proyeccion real — el calculo de origen cambio, casi seguro ya no
-  coincide con el ajuste anterior de geometria.
 - Calibracion geometrica por deteccion de mano sigue deshabilitada —
   retomarla requeriria hardware mas estable (fuente de alimentacion sin
   subvoltaje) o una tecnica de deteccion distinta. El ajuste manual de
