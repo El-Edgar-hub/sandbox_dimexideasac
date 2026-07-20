@@ -273,9 +273,10 @@ HTML = '''<!DOCTYPE html>
   <div class="step-header">
     <div class="step-title">Control de Energía</div>
   </div>
-  <p class="step-desc">Detener el programa lo pausa -- para volver a arrancarlo hace falta SSH, la app de Mac, o reiniciar la RPi (arranca solo). Apagar la RPi la apaga por completo.</p>
+  <p class="step-desc">Reiniciar el programa lo detiene y lo vuelve a arrancar solo (util si algo se ve raro). Detener el programa lo pausa -- para volver a arrancarlo hace falta SSH, la app de Mac, o reiniciar la RPi (arranca solo). Apagar la RPi la apaga por completo.</p>
   <div class="footer" style="margin-top:0">
-    <button class="btn-save" style="background:#374151;color:#e5e7eb" onclick="stopProgram()">⏸ Detener Programa</button>
+    <button class="btn-save" style="background:#1d4ed8;color:#fff" onclick="restartProgram()">🔄 Reiniciar</button>
+    <button class="btn-save" style="background:#374151;color:#e5e7eb" onclick="stopProgram()">⏸ Detener</button>
     <button class="btn-exhib" style="background:#7f1d1d;color:#fca5a5;border-color:transparent" onclick="shutdownRpi()">⏻ Apagar RPi</button>
   </div>
   <div class="feedback" id="fb-power"></div>
@@ -536,6 +537,13 @@ HTML = '''<!DOCTYPE html>
     fetch('/reset_geometry', {method:'POST'}).then(function(r){ return r.json(); }).then(function(data){
       updateConfig(data);
       setFeedback('fb-geo2', 'Geometría reiniciada', 'warn');
+    });
+  }
+
+  function restartProgram() {
+    if (!confirm('¿Reiniciar el programa? La proyección se detiene unos segundos y vuelve a arrancar sola.')) return;
+    fetch('/restart_program', {method:'POST'}).then(function(r){ return r.json(); }).then(function(d){
+      setFeedback('fb-power', d.msg || 'Reiniciando...', 'warn');
     });
   }
 
@@ -812,6 +820,16 @@ def _delayed_run(cmd, delay=1.5):
     no hace falta sudo."""
     time.sleep(delay)
     os.system(cmd)
+
+
+@app.route('/restart_program', methods=['POST'])
+def restart_program_route():
+    # A diferencia de /stop_program, esto SI puede autoservirse mientras el
+    # proceso actual sigue vivo: systemd detiene esta instancia y levanta
+    # una nueva (a diferencia de un stop, que no deja nada corriendo para
+    # atender un futuro "arrancar").
+    threading.Thread(target=_delayed_run, args=('systemctl restart sandbox.service',), daemon=True).start()
+    return jsonify({'msg': 'Reiniciando el programa...'})
 
 
 @app.route('/stop_program', methods=['POST'])
