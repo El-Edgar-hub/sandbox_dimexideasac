@@ -1,0 +1,20 @@
+[Unit]
+Description=AR Sandbox
+After=graphical.target
+Wants=graphical.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=root
+Environment=HOME=/home/fran
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/fran/.Xauthority
+Environment=PYTHONPATH=/home/fran/libfreenect/wrappers/python
+WorkingDirectory=/home/fran/sandbox_dimexideasac
+ExecStart=/usr/bin/python3 -u /home/fran/sandbox_dimexideasac/main.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=graphical.target
