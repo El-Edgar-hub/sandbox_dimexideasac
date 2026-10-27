@@ -1,17 +1,29 @@
+import time
+
 import cv2
 import numpy as np
 
 from config import (
     config, last_depth_frame, last_preview_frame, floor_frame, live_stretch,
-    homography_step, DISPLAY_WIDTH, DISPLAY_HEIGHT,
+    homography_step, DISPLAY_WIDTH, DISPLAY_HEIGHT, MAX_RENDER_FPS,
 )
 from colormap import apply_colormap
 from calibration import _update_live_stretch, get_effective_floor, current_geo_corners
 from overlay import draw_status_overlay, draw_corner_target, draw_geo_guides
 
 
+_last_render = [0.0]
+
+
 def get_depth(dev, data, timestamp):
+    # El frame crudo se guarda SIEMPRE (calibracion y homografia lo muestrean
+    # a su propio ritmo); solo el render se limita a MAX_RENDER_FPS.
     last_depth_frame[0] = data.copy()
+    now = time.monotonic()
+    if now - _last_render[0] < 1.0 / MAX_RENDER_FPS:
+        return
+    _last_render[0] = now
+
     depth = data.astype(np.float32)
 
     invalid = (data == 0) | (data == 2047)
@@ -27,10 +39,16 @@ def get_depth(dev, data, timestamp):
         elev = ref - depth
         depth_max_safe = max(1, config['depth_max'])  # techo: monticulo mas alto
         depth_min_safe = max(1, config['depth_min'])  # ahora es la profundidad de valle mas honda
-        pos_norm = np.clip(elev / depth_max_safe, 0.0, 1.0)
-        neg_norm = np.clip(-elev / depth_min_safe, 0.0, 1.0)
-        # 0.5 = elevacion cero (verde, el suelo fijado) -- ver colormap.py
-        depth_norm = np.where(elev >= 0, 0.5 + 0.5 * pos_norm, 0.5 - 0.5 * neg_norm)
+        # Mismo resultado que 0.5 +/- 0.5*clip(|elev|/rango, 0, 1), pero en
+        # sitio sobre `elev` para no crear ~6 arrays temporales por frame (la
+        # Pi 3B pasa mas tiempo reservando memoria que calculando).
+        pos = elev >= 0
+        np.divide(elev, depth_max_safe, out=elev, where=pos)
+        np.divide(elev, depth_min_safe, out=elev, where=~pos)
+        np.clip(elev, -1.0, 1.0, out=elev)
+        elev *= 0.5
+        elev += 0.5  # 0.5 = elevacion cero (verde, el suelo fijado) -- ver colormap.py
+        depth_norm = elev
     else:
         rng = max(1, config['depth_max'] - config['depth_min'])
         # depth_max = base (valor alto, lejos del Kinect)
@@ -40,7 +58,8 @@ def get_depth(dev, data, timestamp):
 
     depth_norm[invalid] = 0.0
 
-    gray = (depth_norm * 255).astype(np.uint8)
+    depth_norm *= 255
+    gray = depth_norm.astype(np.uint8)
     full_color = apply_colormap(gray)
     color = full_color
 
@@ -79,7 +98,3 @@ def get_depth(dev, data, timestamp):
 
     cv2.imshow('Sandbox', display)
     cv2.waitKey(1)
-
-
-def get_video(dev, data, timestamp):
-    pass

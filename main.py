@@ -6,7 +6,7 @@ import threading
 os.environ['LIBUSB_DEBUG'] = '0'
 
 from config import load_config, DISPLAY_WIDTH, DISPLAY_HEIGHT
-from kinect import get_depth, get_video
+from kinect import get_depth
 from web import run_flask
 
 load_config()
@@ -17,4 +17,7 @@ cv2.namedWindow('Sandbox', cv2.WINDOW_NORMAL)
 cv2.moveWindow('Sandbox', 0, 0)
 cv2.resizeWindow('Sandbox', DISPLAY_WIDTH, DISPLAY_HEIGHT)
 cv2.setWindowProperty('Sandbox', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
-freenect.runloop(depth=get_depth, video=get_video)
+# Solo el stream de profundidad: sin video= el wrapper no enciende la camara
+# RGB del Kinect (no se usa), lo que ahorra ancho de banda USB y corriente --
+# importante en la Pi 3B, donde el USB comparte bus y sufre con bajo voltaje.
+freenect.runloop(depth=get_depth)

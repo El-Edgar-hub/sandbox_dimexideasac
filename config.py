@@ -5,6 +5,10 @@ import numpy as np
 
 DISPLAY_WIDTH = 1920
 DISPLAY_HEIGHT = 1080
+# Tope de frames dibujados por segundo. El Kinect entrega 30 fps, pero la
+# arena cambia lento: dibujar menos deja CPU libre y baja el consumo de la
+# Pi 3B (menos picos de corriente = menos eventos de bajo voltaje).
+MAX_RENDER_FPS = 15
 CONFIG_FILE = os.path.expanduser('~/sandbox_config.json')
 FLOOR_FILE = os.path.expanduser('~/sandbox_floor.npy')
 
