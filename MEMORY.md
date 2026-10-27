@@ -1,6 +1,6 @@
 # MEMORY.md — AR Sandbox (sandbox_dimexideasac)
 
-Ultima actualizacion: 2026-07-20 (commit `34bff15`, branch `v2`).
+Ultima actualizacion: 2026-10-27 (commit `cff4ce2`, branch `v2`).
 
 Este archivo es el que hay que leer primero para entender el estado actual
 del codigo y como se llego hasta aqui. `DEVELOPMENT.md` (fuera del repo,
@@ -104,6 +104,17 @@ geometria (punto anterior) es la via que se usa hoy en su lugar.
 - **`systemd/sandbox.service`** — copia de referencia del servicio
   systemd instalado en la RPi (`/etc/systemd/system/sandbox.service`) para
   que `main.py` arranque solo al encender, sin SSH ni la app de Mac.
+- **`system/`** — copias de referencia de ajustes del sistema instalados
+  en la RPi (no los aplica nada automaticamente):
+  - `blacklist-kinect.conf` → `/etc/modprobe.d/blacklist-kinect.conf`
+    (impide que el driver `gspca_kinect` del kernel tome la camara).
+  - `journald-sandbox-ram.conf` →
+    `/etc/systemd/journald.conf.d/sandbox-ram.conf` (logs en RAM; se
+    pierden al reiniciar la RPi).
+  - Ademas, en `/boot/firmware/config.txt`: `dtparam=audio=off` y
+    `dtoverlay=disable-bt` (respaldo del original en
+    `config.txt.antes-ahorro`); `bluetooth`, `hciuart`, `rpcbind` y
+    `nfs-blkmap` deshabilitados con `systemctl disable`.
 
 Direccion de imports (sin ciclos): `kinect.py` → `calibration.py` +
 `overlay.py`; `web.py` → `calibration.py`; todos → `config.py`.
@@ -302,6 +313,33 @@ No hay rutas de homografia activas — se quitaron todas en el commit
     hasta un restart manual por SSH. Confirmado en vivo el mismo dia: tras
     un restart, el Kinect fallo, systemd reintento solo ~6s despues sin
     intervencion, y la segunda instancia quedo sana.
+19. **Incidente 2026-10-26/27: el proyector no mostraba nada** — el
+    servicio entraba en un ciclo de reinicios (361 en ~2h). Dos causas:
+    (a) subvoltaje severo que hacia que la camara del Kinect se
+    desconectara del USB cada ~60s, y (b) **`libtbb.so.12.15` corrupto en
+    la microSD** (`dpkg --verify libtbb12` daba checksum distinto),
+    probablemente por escrituras durante los bajones de voltaje. TBB es el
+    backend de hilos de OpenCV: cualquier funcion paralela (`resize`,
+    `cvtColor`, `LUT`, `applyColorMap`, `warpPerspective`) daba SEGV con el
+    primer frame, asi que aunque el Kinect inicializara nunca se veia
+    imagen. Se reinstalo con `apt-get install --reinstall libtbb12` (y
+    `libstemmer0d`, tambien corrupto, no usado por el sandbox); un
+    `dpkg --verify` completo no encontro mas danos. Diagnostico rapido si
+    se repite: `python3 -c "import cv2,numpy as np;
+    cv2.resize(np.zeros((480,640),np.uint8),(1920,1080))"` -- si da SEGV
+    pero con `cv2.setNumThreads(1)` no, es TBB otra vez.
+20. **Render ~2.6x mas ligero para la Pi 3B con poca energia**
+    (`cff4ce2`) — `overlay.py` mezclaba el frame 1920x1080 completo
+    (`frame.copy()` + `addWeighted`) solo para un panel pequeno: ~290ms de
+    ~470ms por frame; ahora mezcla solo la ROI (`_blend_rect`). La
+    normalizacion de elevacion en `kinect.py` se hace en sitio. Render
+    limitado a `MAX_RENDER_FPS` (15) en `config.py`, pero el frame crudo
+    se sigue guardando en cada callback para que calibracion/homografia
+    muestreen igual. `main.py` ya no pasa `video=` a `freenect.runloop`, asi
+    que la camara RGB (no usada) queda apagada: las lineas de log
+    "Invalid magic"/"Lost too many packets" bajaron de ~1800/min a ~10/min.
+    Salida verificada pixel por pixel identica a la anterior. CPU del
+    proceso: 157% → ~86%.
 
 ## Decisiones clave
 
@@ -384,6 +422,14 @@ No hay rutas de homografia activas — se quitaron todas en el commit
   de la RPi antes del fix.
 
 ## Pendientes
+
+- **Cambiar la fuente de la RPi** por una de 5.1V / 2.5A o mas con cable
+  corto y grueso (la oficial es lo mas seguro). Al 2026-10-27, incluso con
+  una fuente "nueva", `vcgencmd get_throttled` daba `0x50005` (subvoltaje
+  y throttling activos, CPU fija en 600MHz). Mientras siga, hay riesgo de
+  volver a corromper archivos de la microSD (ver historial #19). Tras el
+  cambio, verificar `get_throttled` = `0x0` y
+  `dmesg | grep -c "Undervoltage detected"` = 0.
 
 - Calibracion geometrica por deteccion de mano sigue deshabilitada —
   retomarla requeriria hardware mas estable (fuente de alimentacion sin
